@@ -1685,7 +1685,7 @@ function wireUI(){
   };
   // restore directly from the repo's raw save file
   $('#btnLoadRepo').onclick=async()=>{
-    if(!confirm('GitHubのバックアップ（'+REPO_SAVE_PATH+'）で現在の進行を上書きします。よろしいですか？')) return;
+    if(!confirm('⚠ 警告：GitHubから復元します\n\n現在プレイ中の進行データは、GitHubのバックアップ（'+REPO_SAVE_PATH+'）の内容で完全に上書きされます。\nこの操作は取り消せません。\n\n※GitHubのバックアップが古い場合、今の進行が失われます。\n\n本当に復元しますか？')) return;
     try{
       const res=await fetch(REPO_RAW_URL+'?t='+Date.now(), {cache:'no-store'});
       if(!res.ok){ toast(res.status===404?'GitHubにバックアップがありません':'取得に失敗しました ('+res.status+')',true); return; }
