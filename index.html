@@ -293,10 +293,17 @@
         <button class="btn ghost" id="btnImport">インポート</button>
         <button class="btn ghost danger" id="btnWipe">セーブ消去</button>
       </div>
+      <div class="btnrow" style="margin-top:6px;">
+        <button class="btn ghost" id="btnCopySave">GitHub用にコピー</button>
+        <button class="btn ghost" id="btnLoadRepo">GitHubから復元</button>
+        <button class="btn ghost" id="btnPasteSave">貼り付けて復元</button>
+      </div>
       <input type="file" id="importFile" accept=".json,application/json" style="display:none">
       <p class="note" style="max-width:560px; margin-top:10px; font-size:12px;">
-        ※ チャット内プレビューは画面が小さく保存も不安定です。ファイルをダウンロードしてブラウザ（Safari等）で開くと大画面＆ブラウザ保存が使えます。
-        端末間で進行を移すときは「エクスポート」でJSONを書き出し、Googleドライブ等に保存→別端末で「インポート」してください。
+        ※ Safari内の保存は約1週間遊ばないと消えることがあります。大切な進行は GitHub にバックアップしてください。<br>
+        <b>バックアップ：</b>「GitHub用にコピー」→ GitHubで <code>saves/save.json</code> を作成/編集して貼り付け→コミット。<br>
+        <b>復元：</b>「GitHubから復元」でリポジトリの <code>saves/save.json</code> を直接読込（または GitHub の内容をコピーして「貼り付けて復元」）。<br>
+        ファイルで残したい場合は「エクスポート」でJSONを書き出し、「インポート」で読み込めます。
       </p>
     </div>
   </section>
@@ -488,6 +495,10 @@ const MISSIONS = [
 
 /* ---------- SAVE ---------- */
 const SAVE_KEY = 'steeldivision:v1';
+// GitHub manual-backup target (public repo). Players paste their save into
+// saves/save.json on this repo; "GitHubから復元" reads it back via raw URL.
+const REPO_SAVE_PATH = 'saves/save.json';
+const REPO_RAW_URL = 'https://raw.githubusercontent.com/propapagandhi-cyber/mech/main/' + REPO_SAVE_PATH;
 // Storage that works in every environment:
 //  - inside Claude: window.storage (cloud)
 //  - standalone browser / Add-to-Home-Screen: localStorage
@@ -1649,15 +1660,52 @@ function wireUI(){
     r.onload=async()=>{
       try{
         const data=JSON.parse(r.result);
-        SAVE=sanitizeSave(data);
-        touchPref=(SAVE.settings&&SAVE.settings.touchMode)||'auto'; isTouch=computeTouch();
-        await Store.set(SAVE_KEY, JSON.stringify(SAVE));
-        refreshTitle(); updateSaveStatus(); refreshModeButtons();
+        await applyLoadedSave(data);
         toast('セーブを読み込みました');
       }catch(err){ toast('読み込めないファイルです',true); }
       e.target.value='';
     };
     r.readAsText(f);
+  };
+  // apply a parsed save object everywhere (shared by import / repo / paste)
+  async function applyLoadedSave(data){
+    SAVE=sanitizeSave(data);
+    touchPref=(SAVE.settings&&SAVE.settings.touchMode)||'auto'; isTouch=computeTouch();
+    await Store.set(SAVE_KEY, JSON.stringify(SAVE));
+    refreshTitle(); updateSaveStatus(); refreshModeButtons();
+  }
+  // copy save JSON to clipboard — paste it into saves/save.json on GitHub
+  $('#btnCopySave').onclick=async()=>{
+    const text=JSON.stringify(SAVE);
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(text); }
+      else { window.prompt('このテキストを全選択してコピーし、GitHubの '+REPO_SAVE_PATH+' に貼り付けてください', text); }
+      toast('コピーしました → GitHubに貼り付け');
+    }catch(e){ window.prompt('このテキストをコピーしてGitHubに貼り付けてください', text); }
+  };
+  // restore directly from the repo's raw save file
+  $('#btnLoadRepo').onclick=async()=>{
+    if(!confirm('GitHubのバックアップ（'+REPO_SAVE_PATH+'）で現在の進行を上書きします。よろしいですか？')) return;
+    try{
+      const res=await fetch(REPO_RAW_URL+'?t='+Date.now(), {cache:'no-store'});
+      if(!res.ok){ toast(res.status===404?'GitHubにバックアップがありません':'取得に失敗しました ('+res.status+')',true); return; }
+      const data=JSON.parse(await res.text());
+      await applyLoadedSave(data);
+      toast('GitHubから復元しました');
+    }catch(e){ toast('GitHubから復元できませんでした',true); }
+  };
+  // restore by pasting JSON text (works with whatever you copied from GitHub)
+  $('#btnPasteSave').onclick=async()=>{
+    let text='';
+    try{ if(navigator.clipboard && navigator.clipboard.readText) text=await navigator.clipboard.readText(); }catch(e){}
+    if(!text){ text=window.prompt('GitHubのセーブJSONを貼り付けてください')||''; }
+    if(!text.trim()) return;
+    try{
+      const data=JSON.parse(text);
+      if(!confirm('貼り付けた内容で現在の進行を上書きします。よろしいですか？')) return;
+      await applyLoadedSave(data);
+      toast('貼り付けたセーブを読み込みました');
+    }catch(e){ toast('JSONを読み取れませんでした',true); }
   };
 
   $('#btnMissBack').onclick=()=>{ refreshTitle(); showScreen('scrTitle'); };
