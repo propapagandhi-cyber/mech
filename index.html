@@ -1,0 +1,1739 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="STEEL DIVISION">
+<title>STEEL DIVISION — コックピット メックシム</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root{
+    --bg:#070a08;          /* cockpit black, green-tinted */
+    --panel:#0e140f;       /* gunmetal panel */
+    --panel-edge:#243024;  /* steel border */
+    --phos:#3dff7a;        /* phosphor green */
+    --phos-dim:#1c7c3e;
+    --amber:#ffb000;       /* caution */
+    --red:#ff3a2f;         /* danger */
+    --cyan:#37d6ff;        /* targeting */
+    --ink:#0a0f0a;
+    --mono:'Share Tech Mono', ui-monospace, monospace;
+    --disp:'Orbitron', var(--mono);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%; background:var(--bg); overflow:hidden; font-family:var(--mono); color:var(--phos);
+    overscroll-behavior:none; -webkit-text-size-adjust:100%;}
+  #app{position:fixed; inset:0;}
+  canvas{display:block;}
+  #scene{position:absolute; inset:0; z-index:1; touch-action:none;}
+  #overlay{position:absolute; inset:0; z-index:2; pointer-events:none;}
+  .hud{position:absolute; inset:0; z-index:3; pointer-events:none; display:none;}
+  .hud.on{display:block;}
+  .screen{-webkit-overflow-scrolling:touch;}
+
+  /* phosphor scanline veil + vignette over the whole canopy */
+  #veil{position:absolute; inset:0; z-index:4; pointer-events:none;
+    background:
+      radial-gradient(120% 90% at 50% 55%, transparent 55%, rgba(0,0,0,.55) 100%),
+      repeating-linear-gradient(0deg, rgba(0,0,0,0) 0 2px, rgba(0,0,0,.12) 2px 3px);
+    mix-blend-mode:multiply;}
+  #flash{position:absolute; inset:0; z-index:5; pointer-events:none; background:var(--red); opacity:0; transition:opacity .12s;}
+
+  /* ---------- cockpit canopy frame ---------- */
+  .strut{position:absolute; z-index:3; pointer-events:none; background:linear-gradient(180deg,#10160f,#05080500);}
+  .strut.left{left:0; top:0; bottom:0; width:7%;
+    background:linear-gradient(90deg,#0c110c 0%, #0c110c 40%, transparent 100%);
+    clip-path:polygon(0 0,100% 0,55% 50%,100% 100%,0 100%);}
+  .strut.right{right:0; top:0; bottom:0; width:7%;
+    background:linear-gradient(270deg,#0c110c 0%, #0c110c 40%, transparent 100%);
+    clip-path:polygon(0 0,100% 0,100% 100%,0 100%,45% 50%);}
+  .strut.bottom{left:0; right:0; bottom:0; height:11%;
+    background:linear-gradient(0deg,#0b100b 0%, #0b100b 45%, transparent 100%);}
+
+  /* ---------- HUD widgets ---------- */
+  .panel{position:absolute; background:linear-gradient(180deg, rgba(14,20,15,.86), rgba(8,12,9,.86));
+    border:1px solid var(--panel-edge); border-radius:3px; padding:8px 10px;
+    box-shadow:inset 0 0 18px rgba(61,255,122,.06), 0 0 0 1px rgba(0,0,0,.5);
+    backdrop-filter:blur(1px);}
+  .label{font-family:var(--disp); font-weight:700; letter-spacing:.18em; font-size:10px; color:var(--phos-dim); text-transform:uppercase;}
+  .val{font-family:var(--disp); font-weight:900; color:var(--phos); text-shadow:0 0 8px rgba(61,255,122,.45);}
+
+  /* heat (bottom-left) */
+  #heatBox{left:2%; bottom:13%; width:190px;}
+  .bar{height:14px; background:#0a0f0a; border:1px solid #1c2a1c; border-radius:2px; overflow:hidden; margin-top:5px; position:relative;}
+  .bar > i{display:block; height:100%; width:0%;
+    background:linear-gradient(90deg,#1c7c3e,#3dff7a 55%,#ffb000 80%,#ff3a2f);}
+  .bar.armor > i{background:linear-gradient(90deg,#1c5a7c,#37d6ff);}
+  .bar .ticks{position:absolute; inset:0; background:repeating-linear-gradient(90deg,transparent 0 17px, rgba(0,0,0,.5) 17px 18px);}
+  #heatTxt,#armorTxt{float:right;}
+
+  /* armor / status (top-left) */
+  #statusBox{left:2%; top:3%; width:200px;}
+  #throttleRow{display:flex; justify-content:space-between; align-items:baseline; margin-top:8px;}
+
+  /* weapons (bottom-right) */
+  #weaponBox{right:2%; bottom:13%; width:230px;}
+  .wpn{display:flex; align-items:center; gap:7px; font-size:12px; padding:3px 4px; border-bottom:1px dotted #18241a;}
+  .wpn:last-child{border-bottom:none;}
+  .wpn .grp{font-family:var(--disp); font-weight:700; font-size:10px; width:16px; height:16px; line-height:16px; text-align:center;
+    border:1px solid var(--phos-dim); border-radius:2px; color:var(--phos);}
+  .wpn .nm{flex:1; color:#bfeccb; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .wpn .am{color:var(--phos-dim); font-size:11px;}
+  .wpn.cool{opacity:.4;}
+  .wpn.empty{opacity:.35; text-decoration:line-through;}
+
+  /* target readout (top-right) */
+  #targetBox{right:2%; top:3%; width:210px; display:none;}
+  #targetBox.on{display:block;}
+  #tName{color:var(--cyan); text-shadow:0 0 8px rgba(55,214,255,.4);}
+
+  /* radar (bottom-center) */
+  #radarBox{left:50%; transform:translateX(-50%); bottom:2%; padding:6px;}
+  #radar{display:block; border-radius:50%;}
+
+  /* messages / alerts */
+  #msg{position:absolute; left:50%; top:18%; transform:translateX(-50%); z-index:6; text-align:center; pointer-events:none;}
+  #msg .big{font-family:var(--disp); font-weight:900; font-size:30px; letter-spacing:.12em; color:var(--amber);
+    text-shadow:0 0 18px rgba(255,176,0,.5); opacity:0; transition:opacity .25s;}
+  #ticker{position:absolute; left:50%; bottom:9%; transform:translateX(-50%); z-index:6; font-size:13px; color:var(--phos);
+    text-shadow:0 0 8px rgba(61,255,122,.4); pointer-events:none; white-space:nowrap;}
+  .blink{animation:bk 1s steps(2) infinite;}
+  @keyframes bk{50%{opacity:.25;}}
+
+  /* ---------- screens (menus) ---------- */
+  .screen{position:absolute; inset:0; z-index:20; display:none; overflow:auto;
+    background:
+      radial-gradient(140% 100% at 50% 0%, #0d160f 0%, #060906 60%, #040604 100%);
+    color:#cfe8d6;}
+  .screen.on{display:block;}
+  .wrap{max-width:980px; margin:0 auto; padding:40px 24px 80px;}
+  .gridbg{position:absolute; inset:0; z-index:-1; opacity:.25; pointer-events:none;
+    background-image:linear-gradient(rgba(61,255,122,.10) 1px,transparent 1px),linear-gradient(90deg,rgba(61,255,122,.10) 1px,transparent 1px);
+    background-size:38px 38px; mask-image:radial-gradient(100% 80% at 50% 30%, black, transparent 80%);}
+
+  h1.title{font-family:var(--disp); font-weight:900; font-size:clamp(38px,9vw,86px); letter-spacing:.06em; line-height:.95;
+    color:#eafff0; text-shadow:0 0 26px rgba(61,255,122,.35); margin-bottom:2px;}
+  h1.title b{color:var(--phos);}
+  .sub{font-family:var(--disp); letter-spacing:.42em; font-size:12px; color:var(--phos-dim); text-transform:uppercase; margin-bottom:34px;}
+  h2{font-family:var(--disp); font-weight:700; letter-spacing:.16em; text-transform:uppercase; color:var(--phos); font-size:15px; margin:22px 0 12px;}
+  .hr{height:1px; background:linear-gradient(90deg,var(--phos-dim),transparent); margin:14px 0;}
+
+  .btn{font-family:var(--disp); font-weight:700; letter-spacing:.14em; text-transform:uppercase; cursor:pointer;
+    background:#0e140f; color:var(--phos); border:1px solid var(--phos-dim); padding:13px 22px; font-size:14px;
+    border-radius:3px; transition:.14s; box-shadow:inset 0 0 0 0 var(--phos);}
+  .btn:hover{background:#13361f; border-color:var(--phos); box-shadow:inset 0 0 22px rgba(61,255,122,.12);}
+  .btn:focus-visible{outline:2px solid var(--cyan); outline-offset:2px;}
+  .btn.lg{padding:16px 34px; font-size:16px;}
+  .btn.ghost{color:#9fc6ab; border-color:#2a3a2d;}
+  .btn.warn{color:var(--amber); border-color:#5a4410;}
+  .btn.danger{color:var(--red); border-color:#5a1410;}
+  .btn:disabled{opacity:.35; cursor:not-allowed;}
+  .btnrow{display:flex; gap:12px; flex-wrap:wrap; margin-top:26px;}
+
+  .stat{font-family:var(--mono); color:#9fc6ab; font-size:13px;}
+  .stat b{color:#eafff0; font-family:var(--disp);}
+  .credits{font-family:var(--disp); font-weight:900; color:var(--amber); font-size:20px; text-shadow:0 0 12px rgba(255,176,0,.35);}
+
+  /* mech lab layout */
+  .lab{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+  @media(max-width:740px){.lab{grid-template-columns:1fr;}}
+  .card{background:#0c120d; border:1px solid var(--panel-edge); border-radius:5px; padding:16px;}
+  .slotline,.itemline{display:flex; align-items:center; gap:10px; padding:8px; border:1px solid #1a261c; border-radius:4px; margin-bottom:7px; background:#0a0f0b;}
+  .itemline:hover{border-color:var(--phos-dim);}
+  .slotline.free{border-style:dashed; color:#5e7a64;}
+  .tag{font-family:var(--disp); font-size:9px; font-weight:700; letter-spacing:.1em; padding:2px 6px; border-radius:3px; text-transform:uppercase;}
+  .tag.energy{color:#ff6a6a; border:1px solid #5a1e1e; background:#1a0c0c;}
+  .tag.ballistic{color:#ffd25a; border:1px solid #5a4a1e; background:#1a160c;}
+  .tag.missile{color:#9a8cff; border:1px solid #2e2a5a; background:#0e0c1a;}
+  .nm2{flex:1;}
+  .nm2 .t{color:#eafff0; font-size:13px;}
+  .nm2 .d{color:#7fa389; font-size:11px;}
+  .mini{font-family:var(--disp); font-size:11px; font-weight:700; padding:6px 10px; border-radius:3px; cursor:pointer;
+    background:#11321d; color:var(--phos); border:1px solid var(--phos-dim);}
+  .mini:hover{background:#175026;}
+  .mini.rm{background:#2a1110; color:var(--red); border-color:#5a1410;}
+  .mini.grp{background:#0c1a26; color:var(--cyan); border-color:#1e4458; min-width:30px;}
+  .mini:disabled{opacity:.35; cursor:not-allowed;}
+  .gauge{display:flex; justify-content:space-between; font-size:12px; color:#9fc6ab; margin:6px 0;}
+  .gauge b{font-family:var(--disp);}
+  .gauge.over b{color:var(--red);}
+  .tabs{display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;}
+  .tab{font-family:var(--disp); font-weight:700; letter-spacing:.1em; font-size:12px; padding:9px 16px; cursor:pointer;
+    border:1px solid #243024; border-radius:3px; color:#7fa389; background:#0a0f0b;}
+  .tab.on{color:var(--ink); background:var(--phos); border-color:var(--phos);}
+  .price{font-family:var(--disp); font-weight:700; color:var(--amber); font-size:13px; min-width:74px; text-align:right;}
+  .note{color:#6f8e76; font-size:12px; line-height:1.6;}
+  .mlist{display:flex; flex-direction:column; gap:9px;}
+  .mrow{display:flex; align-items:center; gap:12px; padding:14px; border:1px solid #1a261c; border-radius:5px; background:#0a0f0b;}
+  .mrow .mi{flex:1;}
+  .mrow .mi .t{font-family:var(--disp); font-weight:700; color:#eafff0; letter-spacing:.06em;}
+  .mrow .mi .d{color:#7fa389; font-size:12px; margin-top:3px;}
+  .difficulty{font-family:var(--disp); font-size:11px; letter-spacing:.1em;}
+  .toast{position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:40; background:#0c120d; border:1px solid var(--phos-dim);
+    color:var(--phos); padding:11px 18px; border-radius:4px; font-size:13px; opacity:0; transition:.2s; pointer-events:none;}
+  .toast.on{opacity:1;}
+  .toast.bad{border-color:var(--red); color:var(--red);}
+
+  /* touch controls — tuned for iPad thumbs */
+  #touch{position:absolute; inset:0; z-index:7; display:none; touch-action:none;}
+  #touch.on{display:block;}
+  #touch *{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  .tzone{position:absolute; pointer-events:auto;}
+  #stick{left:26px; bottom:34px; width:172px; height:172px; border-radius:50%;
+    border:1px solid #2a3a2d; background:rgba(10,15,10,.32); box-shadow:inset 0 0 22px rgba(61,255,122,.05);}
+  #stickNub{position:absolute; left:50%; top:50%; width:70px; height:70px; margin:-35px 0 0 -35px; border-radius:50%;
+    background:rgba(61,255,122,.20); border:1px solid var(--phos-dim);}
+  #lookzone{right:0; top:64px; width:55%; bottom:240px;}   /* clear of buttons + top bar */
+  .tbtn{position:absolute; pointer-events:auto; font-family:var(--disp); font-weight:700; font-size:13px; color:var(--phos);
+    border:1px solid var(--phos-dim); background:rgba(12,20,13,.5); border-radius:50%;
+    display:flex; align-items:center; justify-content:center; backdrop-filter:blur(2px); transition:transform .05s, background .05s;}
+  .tbtn.press{transform:scale(.92); background:rgba(61,255,122,.22);}
+  #fire1{right:30px; bottom:46px; width:104px; height:104px; font-size:15px;}
+  #fire2{right:150px; bottom:60px; width:78px; height:78px; font-size:12px;}
+  #jet{right:64px; bottom:168px; width:72px; height:72px; font-size:12px; color:var(--cyan); border-color:#1e4458;}
+  #cycle{right:176px; bottom:158px; width:64px; height:64px; font-size:11px; color:var(--cyan); border-color:#1e4458;}
+  #pauseBtn{left:50%; transform:translateX(-50%); top:14px; width:56px; height:42px; border-radius:8px; font-size:18px; letter-spacing:.1em;}
+  #pauseBtn.press{transform:translateX(-50%) scale(.92);}
+
+  .kbd{font-family:var(--disp); font-size:11px; color:var(--phos); border:1px solid var(--phos-dim); border-radius:3px; padding:1px 6px; background:#0a0f0b;}
+  .keys{display:grid; grid-template-columns:auto 1fr; gap:8px 14px; font-size:13px; color:#9fc6ab; align-items:center; max-width:420px;}
+  .pausecard{max-width:440px; margin:8vh auto 0;}
+  .row{display:flex; align-items:center; justify-content:space-between; gap:12px; margin:12px 0;}
+  input[type=range]{accent-color:var(--phos); height:30px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="scene"></canvas>
+  <canvas id="overlay"></canvas>
+  <div id="veil"></div>
+  <div id="flash"></div>
+
+  <!-- cockpit canopy -->
+  <div class="strut left"></div>
+  <div class="strut right"></div>
+  <div class="strut bottom"></div>
+
+  <!-- ===== in-mission HUD ===== -->
+  <div class="hud" id="hud">
+    <div class="panel" id="statusBox">
+      <div><span class="label">機体</span> <span class="val" id="chassisName" style="font-size:13px;float:right;">—</span></div>
+      <div class="bar armor"><i id="armorBar"></i><div class="ticks"></div></div>
+      <div style="margin-top:3px;"><span class="label">装甲</span><span class="val" id="armorTxt" style="font-size:12px;">100%</span></div>
+      <div class="bar"><i id="structBar" style="background:#ff7a2f;"></i></div>
+      <div style="margin-top:3px;"><span class="label">構造</span><span class="val" id="structTxt" style="font-size:12px;float:right;">100%</span></div>
+      <div id="throttleRow"><span class="label">速度</span><span class="val" id="spdTxt" style="font-size:13px;">0</span></div>
+    </div>
+
+    <div class="panel" id="heatBox">
+      <div><span class="label">熱量</span><span class="val" id="heatTxt" style="font-size:12px;">0%</span></div>
+      <div class="bar"><i id="heatBar"></i><div class="ticks"></div></div>
+      <div style="margin-top:6px;"><span class="label">ジャンプジェット</span><span class="val" id="jetTxt" style="font-size:12px;float:right;">100%</span></div>
+      <div class="bar"><i id="jetBar" style="background:linear-gradient(90deg,#1e4458,#37d6ff);"></i></div>
+    </div>
+
+    <div class="panel" id="weaponBox">
+      <div class="label" style="margin-bottom:5px;">兵装ベイ</div>
+      <div id="weaponList"></div>
+    </div>
+
+    <div class="panel" id="targetBox">
+      <div><span class="label">目標</span></div>
+      <div class="val" id="tName" style="font-size:14px; margin:2px 0;">—</div>
+      <div class="stat">距離 <b id="tDist">—</b> m</div>
+      <div class="bar armor" style="margin-top:5px;"><i id="tArmor"></i></div>
+      <div class="stat" style="margin-top:3px;">残装甲 <b id="tArmorTxt">—</b></div>
+    </div>
+
+    <div class="panel" id="radarBox">
+      <canvas id="radar" width="120" height="120"></canvas>
+    </div>
+
+    <div id="msg"><div class="big" id="msgBig"></div></div>
+    <div id="ticker"></div>
+  </div>
+
+  <!-- touch controls -->
+  <div id="touch">
+    <div class="tzone" id="lookzone"></div>
+    <div class="tzone" id="stick"><div id="stickNub"></div></div>
+    <div class="tbtn" id="fire1">射撃&nbsp;1</div>
+    <div class="tbtn" id="fire2">射撃&nbsp;2</div>
+    <div class="tbtn" id="jet">JET</div>
+    <div class="tbtn" id="cycle">目標&nbsp;▸</div>
+    <div class="tbtn" id="pauseBtn">❚❚</div>
+  </div>
+
+  <!-- ===== TITLE ===== -->
+  <section class="screen on" id="scrTitle">
+    <div class="gridbg"></div>
+    <div class="wrap">
+      <div class="sub">戦域コマンド・インターフェース · v1.0</div>
+      <h1 class="title">STEEL<br><b>DIVISION</b></h1>
+      <p class="note" style="max-width:560px; margin-top:8px;">
+        あなたは傭兵メックウォリアー。30トンの戦闘機械でアリーナに降下し、熱を管理しながら敵を撃破せよ。
+        サルベージ報酬で強力な武器や重量級機体を購入できる。進行状況は自動保存される。
+      </p>
+      <div class="btnrow">
+        <button class="btn lg" id="btnDeploy">出撃</button>
+        <button class="btn lg ghost" id="btnLab">メックラボ</button>
+        <button class="btn ghost" id="btnHelp">操作方法</button>
+      </div>
+      <div class="hr"></div>
+      <div class="stat" id="titleStats">パイロット記録を読込中…</div>
+      <div class="stat" id="saveStatus" style="margin-top:6px; font-size:12px;">保存先: 確認中…</div>
+      <div class="btnrow">
+        <button class="btn ghost" id="btnFull">全画面</button>
+        <button class="btn ghost" id="btnExport">セーブをエクスポート</button>
+        <button class="btn ghost" id="btnImport">インポート</button>
+        <button class="btn ghost danger" id="btnWipe">セーブ消去</button>
+      </div>
+      <input type="file" id="importFile" accept=".json,application/json" style="display:none">
+      <p class="note" style="max-width:560px; margin-top:10px; font-size:12px;">
+        ※ チャット内プレビューは画面が小さく保存も不安定です。ファイルをダウンロードしてブラウザ（Safari等）で開くと大画面＆ブラウザ保存が使えます。
+        端末間で進行を移すときは「エクスポート」でJSONを書き出し、Googleドライブ等に保存→別端末で「インポート」してください。
+      </p>
+    </div>
+  </section>
+
+  <!-- ===== HELP ===== -->
+  <section class="screen" id="scrHelp">
+    <div class="wrap">
+      <h2>コックピット操作</h2>
+      <div class="keys" id="keyList"></div>
+      <div class="row" style="max-width:420px;"><span class="stat">入力モード</span><button class="mini modeBtn" id="btnModeHelp">操作: 自動</button></div>
+      <p class="note" style="max-width:520px;">iPadではタッチパネルが自動で表示されます。表示されない場合はここで入力をタッチに切り替えてください。</p>
+      <div class="btnrow"><button class="btn" id="btnHelpBack">戻る</button></div>
+    </div>
+  </section>
+
+  <!-- ===== MISSION SELECT ===== -->
+  <section class="screen" id="scrMissions">
+    <div class="wrap">
+      <div class="row"><h2 style="margin:0;">契約</h2><span class="credits" id="missCredits">0 C-bills</span></div>
+      <p class="note">契約を選択。高難度ほど報酬は大きいが、敵も重装になる。出撃の合間にメックラボで修理・再装備を。</p>
+      <div class="mlist" id="missList"></div>
+      <div class="btnrow">
+        <button class="btn ghost" id="btnToLab">メックラボ</button>
+        <button class="btn ghost" id="btnMissBack">タイトル</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== MECH LAB ===== -->
+  <section class="screen" id="scrLab">
+    <div class="wrap">
+      <div class="row">
+        <h2 style="margin:0;">メックラボ</h2>
+        <span class="credits" id="labCredits">0 C-bills</span>
+      </div>
+      <div class="tabs">
+        <div class="tab on" data-tab="loadout">装備</div>
+        <div class="tab" data-tab="arsenal">武器市場</div>
+        <div class="tab" data-tab="bay">整備ベイ</div>
+      </div>
+
+      <!-- LOADOUT -->
+      <div id="tabLoadout">
+        <div class="lab">
+          <div class="card">
+            <h2 style="margin-top:0;">ハードポイント — <span id="loChassis">—</span></h2>
+            <div id="slotList"></div>
+            <div class="hr"></div>
+            <div class="gauge" id="gTon"><span>トン数</span><b>—</b></div>
+            <div class="gauge" id="gHeat"><span>一斉射撃の発熱</span><b>—</b></div>
+            <div class="gauge"><span>持続放熱</span><b id="gCool">—</b></div>
+            <p class="note">装備中の武器のグループ章をタップすると、トリガー&nbsp;1／&nbsp;2を切り替えられます。「外す」で兵装庫に戻します。</p>
+          </div>
+          <div class="card">
+            <h2 style="margin-top:0;">兵装庫 — 武器を装備</h2>
+            <div id="invList" class="mlist"></div>
+            <p class="note" id="invEmpty" style="display:none;">予備の武器がありません。「武器市場」タブで購入できます。</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ARSENAL (shop) -->
+      <div id="tabArsenal" style="display:none;">
+        <div class="card">
+          <h2 style="margin-top:0;">武器市場</h2>
+          <div id="shopWeapons" class="mlist"></div>
+        </div>
+      </div>
+
+      <!-- SERVICE BAY -->
+      <div id="tabBay" style="display:none;">
+        <div class="lab">
+          <div class="card">
+            <h2 style="margin-top:0;">修理</h2>
+            <div class="gauge"><span>装甲</span><b id="repArmor">—</b></div>
+            <button class="btn warn" id="btnRepair" style="width:100%; margin-top:8px;">装甲を修理</button>
+            <div class="hr"></div>
+            <h2>アップグレード</h2>
+            <div class="itemline"><div class="nm2"><div class="t">ダブルヒートシンク <span id="coolLv"></span></div><div class="d" id="coolDesc">—</div></div><span class="price" id="coolPrice">—</span><button class="mini" id="btnCool">購入</button></div>
+            <div class="itemline"><div class="nm2"><div class="t">装甲板 <span id="armLv"></span></div><div class="d" id="armDesc">—</div></div><span class="price" id="armPrice">—</span><button class="mini" id="btnArm">購入</button></div>
+          </div>
+          <div class="card">
+            <h2 style="margin-top:0;">機体ベイ</h2>
+            <div id="chassisList" class="mlist"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="btnrow">
+        <button class="btn" id="btnLabDeploy">契約へ</button>
+        <button class="btn ghost" id="btnLabBack">タイトル</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== BRIEFING ===== -->
+  <section class="screen" id="scrBrief">
+    <div class="wrap">
+      <h2 id="brTitle">契約</h2>
+      <p class="note" id="brDesc"></p>
+      <div class="hr"></div>
+      <div class="stat" id="brWaves"></div>
+      <div class="stat" id="brReward" style="margin-top:6px;"></div>
+      <div class="stat" id="brMech" style="margin-top:6px;"></div>
+      <div class="btnrow">
+        <button class="btn lg" id="btnLaunch">出撃 — 降下開始</button>
+        <button class="btn ghost" id="btnBriefLab">先に再装備</button>
+        <button class="btn ghost" id="btnBriefBack">戻る</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== RESULTS ===== -->
+  <section class="screen" id="scrResult">
+    <div class="wrap" style="text-align:center;">
+      <h1 class="title" id="resTitle" style="font-size:clamp(34px,8vw,72px);">—</h1>
+      <div class="stat" id="resBody" style="margin:14px 0; font-size:15px; line-height:2;"></div>
+      <div class="btnrow" style="justify-content:center;">
+        <button class="btn lg" id="btnResLab">メックラボ</button>
+        <button class="btn lg ghost" id="btnResNext">契約</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== PAUSE ===== -->
+  <section class="screen" id="scrPause">
+    <div class="wrap">
+      <div class="card pausecard">
+        <h2 style="margin-top:0;">システム一時停止</h2>
+        <div class="row"><span class="stat">照準感度</span><input type="range" id="sens" min="20" max="240" step="5"></div>
+        <div class="row"><span class="stat">サウンド</span><button class="mini" id="btnSound">オン</button></div>
+        <div class="row"><span class="stat">入力</span><button class="mini modeBtn" id="btnMode">操作: 自動</button></div>
+        <div class="hr"></div>
+        <div class="btnrow">
+          <button class="btn" id="btnResume">再開</button>
+          <button class="btn ghost warn" id="btnAbort">ミッション中断</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   STEEL DIVISION — first-person cockpit mech sim
+   Three.js r128 · persistent save via window.storage
+   ============================================================ */
+
+/* ---------- DATA: weapons ---------- */
+// type: energy(hitscan,no ammo) | ballistic(projectile,ammo) | missile(salvo,ammo,splash)
+const WEAPONS = {
+  smlas: {id:'smlas', name:'スモールレーザー',   type:'energy',    dmg:8,  heat:5,  cd:0.55, range:240, ton:1,  cost:9000,   ammo:0,  proj:0,   color:0xff4d4d},
+  mdlas: {id:'mdlas', name:'ミディアムレーザー',  type:'energy',    dmg:15, heat:11, cd:0.95, range:340, ton:2,  cost:34000,  ammo:0,  proj:0,   color:0xff3a3a},
+  lglas: {id:'lglas', name:'ラージレーザー',   type:'energy',    dmg:26, heat:22, cd:1.6,  range:520, ton:5,  cost:98000,  ammo:0,  proj:0,   color:0xff2a2a},
+  ppc:   {id:'ppc',   name:'PPC（粒子砲）',           type:'energy',    dmg:34, heat:30, cd:2.1,  range:560, ton:7,  cost:190000, ammo:0,  proj:120, color:0x9ad0ff, splash:8},
+  mg:    {id:'mg',    name:'マシンガン',   type:'ballistic', dmg:3,  heat:0,  cd:0.10, range:130, ton:1,  cost:6000,   ammo:600,proj:380, color:0xfff2a0},
+  ac2:   {id:'ac2',   name:'オートキャノン/2',  type:'ballistic', dmg:11, heat:2,  cd:0.45, range:520, ton:3,  cost:48000,  ammo:120,proj:300, color:0xffd25a},
+  ac10:  {id:'ac10',  name:'オートキャノン/10', type:'ballistic', dmg:28, heat:4,  cd:1.6,  range:380, ton:6,  cost:160000, ammo:50, proj:260, color:0xffc04a},
+  ac20:  {id:'ac20',  name:'オートキャノン/20', type:'ballistic', dmg:48, heat:7,  cd:2.4,  range:260, ton:10, cost:320000, ammo:30, proj:230, color:0xffae3a},
+  srm:   {id:'srm',   name:'SRM‑6（短距離ミサイル）',         type:'missile',   dmg:7,  heat:4,  cd:1.3,  range:300, ton:3,  cost:72000,  ammo:120,proj:150, color:0xb8a8ff, count:6, splash:6},
+  lrm:   {id:'lrm',   name:'LRM‑10（長距離ミサイル）',        type:'missile',   dmg:5,  heat:5,  cd:1.7,  range:620, ton:5,  cost:120000, ammo:120,proj:130, color:0x9a8cff, count:10, splash:5, homing:true},
+};
+
+/* ---------- DATA: chassis ---------- */
+const CHASSIS = {
+  cmd: {id:'cmd', name:'コマンド', cls:'軽量',  ton:25, slots:4, maxArmorBase:120, structure:60,  speed:46, turn:1.9, baseCool:5,  cost:0,       jet:1.0},
+  cnt: {id:'cnt', name:'センチュリオン',cls:'中量', ton:38, slots:5, maxArmorBase:200, structure:95,  speed:34, turn:1.5, baseCool:6,  cost:380000,  jet:0.8},
+  atl: {id:'atl', name:'アトラス',    cls:'重量',  ton:60, slots:6, maxArmorBase:320, structure:160, speed:24, turn:1.05,baseCool:7,  cost:1250000, jet:0.55},
+};
+
+/* ---------- DATA: enemy templates ---------- */
+const FOES = {
+  scout: {name:'ローカスト',   structure:70,  speed:40, dmg:6,  fireCd:0.9, range:280, color:0x7fd0ff, scale:0.78, reward:9000},
+  med:   {name:'ハンチバック',structure:150, speed:26, dmg:14, fireCd:1.3, range:340, color:0xff8a4a, scale:1.0,  reward:18000},
+  heavy: {name:'ウォーハンマー',structure:260, speed:18, dmg:24, fireCd:1.7, range:430, color:0xff5a5a, scale:1.22, reward:34000},
+};
+
+/* ---------- DATA: missions ---------- */
+const MISSIONS = [
+  {id:0, name:'前哨小競り合い',  diff:'★☆☆☆', reward:55000,  waves:[['scout','scout'],['scout','med']]},
+  {id:1, name:'国境襲撃',      diff:'★★☆☆', reward:90000,  waves:[['scout','med'],['med','med'],['med','scout','scout']]},
+  {id:2, name:'補給線遮断',    diff:'★★★☆', reward:150000, waves:[['med','med'],['heavy','scout'],['med','med','scout']]},
+  {id:3, name:'威力偵察',   diff:'★★★☆', reward:210000, waves:[['med','med','scout'],['heavy','med'],['heavy','heavy']]},
+  {id:4, name:'指揮系統破壊',     diff:'★★★★', reward:340000, waves:[['heavy','med','med'],['heavy','heavy'],['heavy','heavy','med','scout']]},
+];
+
+/* ---------- SAVE ---------- */
+const SAVE_KEY = 'steeldivision:v1';
+// Storage that works in every environment:
+//  - inside Claude: window.storage (cloud)
+//  - standalone browser / Add-to-Home-Screen: localStorage
+//  - if both blocked: in-memory (this session only)
+const Store = (()=>{
+  const mem={};
+  const hasWS = (typeof window!=='undefined' && window.storage && typeof window.storage.get==='function');
+  let hasLS=false; try{ localStorage.setItem('__t','1'); localStorage.removeItem('__t'); hasLS=true; }catch(e){ hasLS=false; }
+  let cloudDead=false;
+  function backend(){ if(hasWS && !cloudDead) return 'cloud'; if(hasLS) return 'local'; return 'memory'; }
+  async function get(key){
+    if(hasWS && !cloudDead){ try{ const r=await window.storage.get(key); if(r && r.value!=null) return r.value; }catch(e){ cloudDead=true; } }
+    if(hasLS){ try{ const v=localStorage.getItem(key); if(v!=null) return v; }catch(e){} }
+    return mem[key]!=null?mem[key]:null;
+  }
+  async function set(key,val){
+    let ok=false;
+    if(hasWS && !cloudDead){ try{ await window.storage.set(key,val); ok=true; }catch(e){ cloudDead=true; } }
+    if(hasLS){ try{ localStorage.setItem(key,val); ok=true; }catch(e){} }
+    mem[key]=val;
+    return ok || backend()==='memory';
+  }
+  async function del(key){
+    if(hasWS && !cloudDead){ try{ await window.storage.delete(key); }catch(e){} }
+    if(hasLS){ try{ localStorage.removeItem(key); }catch(e){} }
+    delete mem[key];
+  }
+  const LABEL={cloud:'Claudeクラウドに保存', local:'この端末のブラウザに保存', memory:'一時保存のみ（このセッション限り）'};
+  return {get,set,del,backend,label:()=>LABEL[backend()]};
+})();
+const DEFAULT_SAVE = () => ({
+  v:1,
+  credits:150000,
+  ownedChassis:['cmd'],
+  current:'cmd',
+  // per-chassis state
+  chassisState:{
+    cmd:{ loadout:[{id:'mdlas',grp:1},{id:'mdlas',grp:1},{id:'ac2',grp:2}], armorLv:0, coolLv:0, armor:120 },
+  },
+  inventory:['smlas'],            // spare weapons not fitted
+  unlockedMission:0,
+  stats:{kills:0, missions:0, deaths:0, damage:0},
+  settings:{sens:110, sound:true},
+});
+
+let SAVE = DEFAULT_SAVE();
+
+async function loadSave(){
+  let raw=null;
+  try{
+    const v = await Store.get(SAVE_KEY);
+    if(v) raw = JSON.parse(v);
+  }catch(e){ raw=null; }            // no save yet, or unreadable
+  SAVE = sanitizeSave(raw);
+}
+// Rebuild any missing/corrupt field so a bad save can never brick startup.
+function sanitizeSave(s){
+  const d = DEFAULT_SAVE();
+  if(!s || typeof s!=='object') return d;
+  const num=(v,f)=>(typeof v==='number'&&isFinite(v))?v:f;
+  const out = d;
+  out.credits = Math.max(0, num(s.credits, d.credits));
+  out.unlockedMission = clampInt(s.unlockedMission, 0, MISSIONS.length-1, 0);
+  // owned chassis — keep only valid ids, always include starter
+  out.ownedChassis = Array.isArray(s.ownedChassis) ? s.ownedChassis.filter(id=>CHASSIS[id]) : [];
+  if(!out.ownedChassis.includes('cmd')) out.ownedChassis.unshift('cmd');
+  out.current = CHASSIS[s.current] && out.ownedChassis.includes(s.current) ? s.current : 'cmd';
+  // inventory — valid weapon ids only
+  out.inventory = Array.isArray(s.inventory) ? s.inventory.filter(id=>WEAPONS[id]) : [];
+  // per-chassis state
+  out.chassisState = {};
+  const srcCS = (s.chassisState && typeof s.chassisState==='object') ? s.chassisState : {};
+  out.ownedChassis.forEach(id=>{
+    const ch=CHASSIS[id], src=srcCS[id]||{};
+    const armorLv = clampInt(src.armorLv, 0, 8, 0);
+    const coolLv  = clampInt(src.coolLv, 0, 6, 0);
+    const maxA = ch.maxArmorBase + armorLv*40;
+    let loadout = Array.isArray(src.loadout) ? src.loadout : [];
+    loadout = loadout
+      .filter(w=>w && WEAPONS[w.id])
+      .slice(0, ch.slots)
+      .map(w=>({id:w.id, grp:(w.grp===2?2:1)}));
+    out.chassisState[id] = {
+      loadout, armorLv, coolLv,
+      armor: clamp(num(src.armor, maxA), 0, maxA),
+    };
+  });
+  // make sure starter has a default loadout if totally empty everywhere
+  if(out.chassisState.cmd && out.chassisState.cmd.loadout.length===0 && out.inventory.length===0
+     && Object.values(out.chassisState).every(c=>c.loadout.length===0)){
+    out.chassisState.cmd.loadout = [{id:'mdlas',grp:1},{id:'mdlas',grp:1},{id:'ac2',grp:2}];
+  }
+  // stats
+  const st = (s.stats&&typeof s.stats==='object')?s.stats:{};
+  out.stats = {kills:num(st.kills,0), missions:num(st.missions,0), deaths:num(st.deaths,0), damage:num(st.damage,0)};
+  // settings
+  const se = (s.settings&&typeof s.settings==='object')?s.settings:{};
+  out.settings = {sens:clamp(num(se.sens,110),20,240), sound: se.sound!==false,
+    touchMode: (['auto','touch','mouse'].includes(se.touchMode)? se.touchMode : 'auto')};
+  out.v = 1;
+  return out;
+}
+function clampInt(v,a,b,f){ v=parseInt(v,10); if(!isFinite(v)) v=f; return Math.max(a,Math.min(b,v)); }
+let saveTimer=null;
+function persist(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async ()=>{
+    try{ await Store.set(SAVE_KEY, JSON.stringify(SAVE)); }catch(e){ console.warn('save failed',e); }
+    updateSaveStatus();
+  }, 150);
+}
+function updateSaveStatus(){
+  const el=document.getElementById('saveStatus'); if(!el) return;
+  const b=Store.backend();
+  el.textContent='保存先: '+Store.label();
+  el.style.color = b==='memory' ? 'var(--amber)' : 'var(--phos-dim)';
+}
+
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const fmt = n => Math.round(n).toLocaleString('en-US');
+const TYPE_JP = {energy:'エネルギー', ballistic:'実弾', missile:'ミサイル'};
+function toast(t, bad){ const el=$('#toast'); el.textContent=t; el.className='toast on'+(bad?' bad':''); clearTimeout(el._t); el._t=setTimeout(()=>el.className='toast',1800); }
+
+/* ============================================================
+   AUDIO — tiny WebAudio synth
+   ============================================================ */
+const Audio = (()=>{
+  let ctx=null;
+  function ac(){ if(!ctx) ctx = new (window.AudioContext||window.webkitAudioContext)(); return ctx; }
+  function on(){ return SAVE.settings && SAVE.settings.sound; }
+  function blip(freq,dur,type,vol){
+    if(!on()) return;
+    try{
+      const c=ac(), o=c.createOscillator(), g=c.createGain();
+      o.type=type||'square'; o.frequency.value=freq;
+      g.gain.value=(vol||0.06); o.connect(g); g.connect(c.destination);
+      const t=c.currentTime; o.start(t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+      o.frequency.exponentialRampToValueAtTime(freq*0.6, t+dur);
+      o.stop(t+dur);
+    }catch(e){}
+  }
+  function noise(dur,vol){
+    if(!on()) return;
+    try{
+      const c=ac(); const n=c.sampleRate*dur; const buf=c.createBuffer(1,n,c.sampleRate); const d=buf.getChannelData(0);
+      for(let i=0;i<n;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/n,2);
+      const s=c.createBufferSource(); s.buffer=buf; const g=c.createGain(); g.gain.value=vol||0.12;
+      s.connect(g); g.connect(c.destination); s.start();
+    }catch(e){}
+  }
+  return {
+    laser:()=>blip(880,0.12,'sawtooth',0.05),
+    cannon:()=>{noise(0.09,0.10); blip(140,0.12,'square',0.06);},
+    missile:()=>blip(420,0.2,'triangle',0.05),
+    hit:()=>noise(0.06,0.08),
+    explode:()=>{noise(0.4,0.16); blip(90,0.4,'square',0.07);},
+    warn:()=>blip(330,0.18,'square',0.05),
+    resume:()=>{ try{ ac().resume(); }catch(e){} },
+  };
+})();
+
+/* ============================================================
+   THREE scene
+   ============================================================ */
+let renderer, scene, camera, clock;
+const ARENA = 620;            // half-size of square arena
+let obstacles = [];           // {mesh, box:THREE.Box3, r}
+function initThree(){
+  const cv = $('#scene');
+  renderer = new THREE.WebGLRenderer({canvas:cv, antialias:true, powerPreference:'high-performance'});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a1410);
+  scene.fog = new THREE.Fog(0x0a1410, 300, 1100);
+
+  camera = new THREE.PerspectiveCamera(72, 1, 0.5, 3000);
+
+  const hemi = new THREE.HemisphereLight(0x9fc6ff, 0x20301c, 0.75); scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xfff0d0, 0.9); sun.position.set(-300,500,200); scene.add(sun);
+
+  // ground
+  const groundGeo = new THREE.PlaneGeometry(ARENA*2.4, ARENA*2.4, 1,1);
+  const groundMat = new THREE.MeshStandardMaterial({color:0x16241a, roughness:1, metalness:0});
+  const ground = new THREE.Mesh(groundGeo, groundMat); ground.rotation.x=-Math.PI/2; scene.add(ground);
+
+  // grid
+  const grid = new THREE.GridHelper(ARENA*2.4, 60, 0x2f6b46, 0x18351f);
+  grid.material.opacity=0.5; grid.material.transparent=true; grid.position.y=0.1; scene.add(grid);
+
+  buildArena();
+  clock = new THREE.Clock();
+  resize();
+  window.addEventListener('resize', resize);
+}
+function resize(){
+  const w=window.innerWidth, h=window.innerHeight;
+  renderer.setSize(w,h); camera.aspect=w/h; camera.updateProjectionMatrix();
+  const ov=$('#overlay'); ov.width=w; ov.height=h;
+}
+
+function buildArena(){
+  // clear old obstacles
+  obstacles.forEach(o=>scene.remove(o.mesh)); obstacles=[];
+  // boundary wall ring (visual)
+  const wallMat = new THREE.MeshStandardMaterial({color:0x24130f, roughness:.9, emissive:0x3a0a06, emissiveIntensity:.15});
+  const ringGeo = new THREE.RingGeometry(ARENA*1.55, ARENA*1.7, 64);
+  // scatter buildings
+  const bmat = new THREE.MeshStandardMaterial({color:0x202a22, roughness:.85, metalness:.1});
+  const count = 16;
+  for(let i=0;i<count;i++){
+    const w = 30+Math.random()*60, d=30+Math.random()*60, h=30+Math.random()*120;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), bmat.clone());
+    let x,z, tries=0;
+    do{ x=(Math.random()*2-1)*ARENA*0.85; z=(Math.random()*2-1)*ARENA*0.85; tries++; }
+    while(Math.hypot(x,z)<120 && tries<20);
+    m.position.set(x,h/2,z);
+    m.material.color.offsetHSL(0,0,(Math.random()-0.5)*0.06);
+    scene.add(m);
+    const box = new THREE.Box3().setFromObject(m);
+    obstacles.push({mesh:m, box, hw:w/2+6, hd:d/2+6, x, z});
+  }
+}
+
+/* ---------- mech model builder ---------- */
+function buildMech(color, scale){
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({color, roughness:.5, metalness:.45});
+  const dark = new THREE.MeshStandardMaterial({color:0x111813, roughness:.7, metalness:.3});
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(16,14,11), mat); torso.position.y=20; g.add(torso);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(7,6,7), dark); head.position.set(0,29,2); g.add(head);
+  const eye = new THREE.Mesh(new THREE.BoxGeometry(5,1.6,0.6), new THREE.MeshStandardMaterial({color:0x9af, emissive:0x3aa0ff, emissiveIntensity:1.4}));
+  eye.position.set(0,29.6,5.6); g.add(eye);
+  // arms / weapon pods
+  for(const s of [-1,1]){
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(5,12,5), mat); arm.position.set(s*12,20,0); g.add(arm);
+    const pod = new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.4,9,8), dark); pod.rotation.x=Math.PI/2; pod.position.set(s*12,21,6); g.add(pod);
+  }
+  // legs
+  for(const s of [-1,1]){
+    const hip = new THREE.Mesh(new THREE.BoxGeometry(6,11,6), mat); hip.position.set(s*5,9,0); g.add(hip);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(8,3,12), dark); foot.position.set(s*5,1.6,1); g.add(foot);
+  }
+  g.scale.setScalar(scale||1);
+  return g;
+}
+
+/* ============================================================
+   GAME STATE
+   ============================================================ */
+const STATE = {mode:'menu'};  // menu|playing|paused
+const player = {
+  pos:new THREE.Vector3(0,0,0),
+  yaw:0, pitch:0,
+  vel:new THREE.Vector3(),
+  speed:0,
+  armor:0, maxArmor:0, structure:0, maxStructure:0,
+  heat:0, maxHeat:100, cool:5,
+  jet:1, jetMax:1, jetRate:0.35,
+  chassis:null,
+  weapons:[],   // {def, grp, cd, ammo, maxAmmo}
+  eye:9,
+};
+let enemies=[];        // {grp, def, pos, hp, maxhp, fireCd, vel, alive}
+let projectiles=[];    // {mesh, vel, dmg, range, traveled, owner, splash, homing, target, color}
+let beams=[];          // transient hitscan beams {a,b,life,color}
+let mission=null, waveIdx=0, target=null, missionStartArmor=0, killsThisMission=0, dmgThisMission=0;
+const keys={};
+let invuln=0;
+
+/* ---------- chassis state helpers ---------- */
+function cstate(id){
+  id = id||SAVE.current;
+  if(!SAVE.chassisState[id]){
+    const ch=CHASSIS[id];
+    SAVE.chassisState[id]={loadout:[], armorLv:0, coolLv:0, armor:ch.maxArmorBase};
+  }
+  return SAVE.chassisState[id];
+}
+function maxArmorOf(id){ const ch=CHASSIS[id]; return ch.maxArmorBase + cstate(id).armorLv*40; }
+function coolOf(id){ const ch=CHASSIS[id]; return ch.baseCool + cstate(id).coolLv*2.5; }
+function tonnageUsed(id){ return cstate(id).loadout.reduce((s,w)=>s+WEAPONS[w.id].ton,0); }
+function alphaHeat(id){ return cstate(id).loadout.reduce((s,w)=>s+WEAPONS[w.id].heat,0); }
+
+/* ============================================================
+   MISSION FLOW
+   ============================================================ */
+function buildPlayerFromSave(){
+  const id=SAVE.current, ch=CHASSIS[id], cs=cstate(id);
+  player.chassis=ch;
+  player.maxArmor=maxArmorOf(id);
+  player.armor=clamp(cs.armor, 0, player.maxArmor);
+  player.maxStructure=ch.structure; player.structure=ch.structure;
+  player.cool=coolOf(id);
+  player.jetMax=ch.jet; player.jet=ch.jet;
+  player.maxHeat=100; player.heat=0;
+  player.weapons = cs.loadout.map(w=>{
+    const d=WEAPONS[w.id];
+    return {def:d, grp:w.grp||1, cd:0, ammo:d.ammo, maxAmmo:d.ammo};
+  });
+}
+
+function startMission(mi){
+  mission=MISSIONS[mi]; waveIdx=0; killsThisMission=0; dmgThisMission=0;
+  buildPlayerFromSave();
+  missionStartArmor=player.armor;
+  // reset world position
+  player.pos.set(0,0,0); player.yaw=0; player.pitch=0; player.vel.set(0,0,0);
+  clearActors();
+  spawnWave();
+  setMode('playing');
+  bigMsg('契約: '+mission.name);
+  ticker('ウェーブ 1 / '+mission.waves.length+' — 敵を撃破せよ');
+  Audio.resume();
+}
+function clearActors(){
+  enemies.forEach(e=>scene.remove(e.grp)); enemies=[];
+  projectiles.forEach(p=>scene.remove(p.mesh)); projectiles=[];
+  beams=[]; target=null;
+}
+function spawnWave(){
+  const list = mission.waves[waveIdx];
+  list.forEach((type,i)=>{
+    const f=FOES[type];
+    const ang = (i/list.length)*Math.PI*2 + Math.random();
+    const dist = 380+Math.random()*180;
+    const grp = buildMech(f.color, f.scale);
+    const pos = new THREE.Vector3(Math.cos(ang)*dist, 0, Math.sin(ang)*dist);
+    grp.position.copy(pos);
+    scene.add(grp);
+    enemies.push({grp, def:f, type, pos, hp:f.structure, maxhp:f.structure, fireCd:1+Math.random(), alive:true});
+  });
+}
+function nextWaveOrWin(){
+  waveIdx++;
+  if(waveIdx>=mission.waves.length){ winMission(); return; }
+  bigMsg('ウェーブ '+(waveIdx+1));
+  ticker('ウェーブ '+(waveIdx+1)+' / '+mission.waves.length+' 接近中');
+  setTimeout(spawnWave, 1400);
+}
+
+function winMission(){
+  const reward = mission.reward + killsThisMission*5000;
+  SAVE.credits += reward;
+  SAVE.stats.missions++;
+  // persist armor damage state
+  cstate(SAVE.current).armor = player.armor;
+  if(mission.id+1 > SAVE.unlockedMission) SAVE.unlockedMission = Math.min(MISSIONS.length-1, mission.id+1);
+  persist();
+  exitToScreen();
+  showResult(true, reward);
+}
+function loseMission(){
+  SAVE.stats.deaths++;
+  cstate(SAVE.current).armor = 0;     // wrecked — needs repair
+  persist();
+  exitToScreen();
+  showResult(false, 0);
+}
+
+/* ============================================================
+   COMBAT
+   ============================================================ */
+function fireGroup(grp){
+  if(player.heat>=player.maxHeat) return;   // shutdown
+  let fired=false;
+  const origin = camera.position.clone();
+  const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+  // gentle aim-assist: if a locked target sits near the crosshair, bias toward it
+  if(target && target.alive){
+    const tc=target.pos.clone(); tc.y=20*target.def.scale;
+    const td=tc.clone().sub(origin).normalize();
+    if(td.dot(dir) > 0.955) dir.lerp(td, 0.55).normalize();
+  }
+  for(const w of player.weapons){
+    if(w.grp!==grp || w.cd>0) continue;
+    const d=w.def;
+    if(d.ammo>0 && w.ammo<=0) continue;
+    // heat gate: don't allow firing that would massively overheat? allow but warn
+    fireWeapon(w, origin, dir);
+    w.cd = d.cd;
+    player.heat = clamp(player.heat + d.heat, 0, player.maxHeat);
+    if(d.ammo>0){ w.ammo -= (d.count||1); }
+    fired=true;
+  }
+  if(fired && player.heat>=player.maxHeat){ bigMsg('リアクター停止'); Audio.warn(); }
+}
+function fireWeapon(w, origin, dir){
+  const d=w.def;
+  if(d.type==='energy' && d.proj===0){
+    // hitscan beam
+    Audio.laser();
+    const hit = raycastEnemies(origin, dir, d.range);
+    const end = origin.clone().add(dir.clone().multiplyScalar(hit?hit.dist:d.range));
+    beams.push({a:origin.clone(), b:end, life:0.08, color:d.color});
+    if(hit){ damageEnemy(hit.enemy, d.dmg); }
+  } else {
+    // projectile(s)
+    if(d.type==='ballistic') Audio.cannon(); else Audio.missile();
+    const n = d.count||1;
+    for(let i=0;i<n;i++){
+      const spread = n>1 ? 0.05 : 0.012;
+      const v = dir.clone();
+      v.x += (Math.random()-0.5)*spread; v.y += (Math.random()-0.5)*spread; v.z += (Math.random()-0.5)*spread;
+      v.normalize().multiplyScalar(d.proj);
+      const geo = d.type==='missile'? new THREE.SphereGeometry(1.2,6,6) : new THREE.SphereGeometry(0.9,6,6);
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({color:d.color}));
+      const start = origin.clone().add(dir.clone().multiplyScalar(4));
+      start.y -= 1.5;
+      mesh.position.copy(start); scene.add(mesh);
+      projectiles.push({mesh, vel:v, dmg:d.dmg, range:d.range, traveled:0, owner:'player',
+        splash:d.splash||0, homing:d.homing&&target?target:null, color:d.color});
+    }
+  }
+}
+// hitscan against enemy spheres
+function raycastEnemies(origin, dir, range){
+  let best=null;
+  for(const e of enemies){
+    if(!e.alive) continue;
+    const c = e.pos.clone(); c.y = 20*e.def.scale;
+    const oc = c.clone().sub(origin);
+    const t = oc.dot(dir);
+    if(t<0 || t>range) continue;
+    const closest = origin.clone().add(dir.clone().multiplyScalar(t));
+    const dd = closest.distanceTo(c);
+    const rad = 12*e.def.scale;
+    if(dd<rad){
+      // obstacle occlusion check
+      if(blockedByObstacle(origin, c)) continue;
+      if(!best || t<best.dist) best={enemy:e, dist:t};
+    }
+  }
+  return best;
+}
+function blockedByObstacle(a,b){
+  const dir=b.clone().sub(a); const len=dir.length(); dir.normalize();
+  for(const o of obstacles){
+    // simple slab test on XZ, treat building as tall
+    const half={x:o.hw, z:o.hd};
+    const rel0x=a.x-o.x, rel0z=a.z-o.z;
+    // step march (cheap)
+  }
+  // cheap march
+  const steps = Math.min(40, Math.ceil(len/14));
+  for(let i=1;i<steps;i++){
+    const p = a.clone().add(dir.clone().multiplyScalar(len*i/steps));
+    for(const o of obstacles){
+      if(Math.abs(p.x-o.x)<o.hw && Math.abs(p.z-o.z)<o.hd && p.y< (o.mesh.geometry.parameters.height||80)) return true;
+    }
+  }
+  return false;
+}
+function damageEnemy(e, dmg){
+  if(!e.alive) return;
+  e.hp -= dmg; Audio.hit();
+  // hit spark
+  flashMesh(e.grp);
+  if(e.hp<=0){
+    e.alive=false; scene.remove(e.grp);
+    killsThisMission++; SAVE.stats.kills++;
+    Audio.explode();
+    if(target===e) target=null;
+    spawnExplosion(e.pos.clone());
+    // wave cleared?
+    if(enemies.every(x=>!x.alive)) nextWaveOrWin();
+  }
+}
+function flashMesh(grp){
+  grp.traverse(m=>{ if(m.material && m.material.emissive){ m.material._e=m.material.emissive.getHex(); m.material.emissive.setHex(0xffffff);} });
+  setTimeout(()=>grp.traverse(m=>{ if(m.material && m.material._e!==undefined) m.material.emissive.setHex(m.material._e); }),60);
+}
+let explosions=[];
+function spawnExplosion(pos){
+  pos.y=20;
+  const m = new THREE.Mesh(new THREE.SphereGeometry(6,10,10), new THREE.MeshBasicMaterial({color:0xffaa33, transparent:true, opacity:0.9}));
+  m.position.copy(pos); scene.add(m); explosions.push({mesh:m, life:0.5, t:0});
+}
+
+function enemyFire(e){
+  const from = e.pos.clone(); from.y=20*e.def.scale;
+  const to = player.pos.clone(); to.y=player.eye;
+  if(blockedByObstacle(from,to)) return;
+  const dir = to.clone().sub(from).normalize();
+  // small inaccuracy
+  dir.x += (Math.random()-0.5)*0.04; dir.z += (Math.random()-0.5)*0.04; dir.normalize();
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(1.3,6,6), new THREE.MeshBasicMaterial({color:e.def.color}));
+  mesh.position.copy(from); scene.add(mesh);
+  projectiles.push({mesh, vel:dir.multiplyScalar(220), dmg:e.def.dmg, range:e.def.range+120, traveled:0, owner:'enemy', splash:0, color:e.def.color});
+  Audio.cannon();
+}
+function hurtPlayer(dmg){
+  if(invuln>0) return;
+  player.armor -= dmg;
+  if(player.armor<0){ player.structure += player.armor; player.armor=0; }
+  dmgThisMission += dmg; SAVE.stats.damage += dmg;
+  damageFlash();
+  Audio.hit();
+  if(player.structure<=0){ player.structure=0; loseMission(); }
+}
+function damageFlash(){ const f=$('#flash'); f.style.opacity='0.5'; setTimeout(()=>f.style.opacity='0',120); }
+
+/* ============================================================
+   UPDATE LOOP
+   ============================================================ */
+let look={x:0,y:0};            // accumulated look delta (mouse/touch)
+let moveVec={x:0,y:0};         // touch stick
+function update(dt){
+  if(STATE.mode!=='playing') return;
+  const ch=player.chassis;
+
+  // ---- look ----
+  const sens = (SAVE.settings.sens||110)/12000;
+  player.yaw   -= look.x*sens;
+  player.pitch -= look.y*sens;
+  player.pitch = clamp(player.pitch, -0.6, 0.5);
+  look.x=0; look.y=0;
+
+  const shutdown = player.heat>=player.maxHeat;
+
+  // ---- movement ----
+  let fwd=0, strafe=0;
+  if(!shutdown){
+    if(keys['w']) fwd+=1; if(keys['s']) fwd-=1;
+    if(keys['a']) strafe-=1; if(keys['d']) strafe+=1;
+    if(moveVec.x||moveVec.y){ strafe+=moveVec.x; fwd+=-moveVec.y; }
+  }
+  const sinY=Math.sin(player.yaw), cosY=Math.cos(player.yaw);
+  // forward dir in XZ (yaw 0 => -Z)
+  const fx = -sinY, fz = -cosY;
+  const rx = cosY, rz = -sinY;
+  const sp = ch.speed;
+  const desired = new THREE.Vector3(
+    (fx*fwd + rx*strafe)*sp,
+    0,
+    (fz*fwd + rz*strafe)*sp
+  );
+  // clamp diagonal
+  const horiz = Math.hypot(desired.x, desired.z);
+  if(horiz>sp){ desired.x*=sp/horiz; desired.z*=sp/horiz; }
+  player.vel.x = desired.x; player.vel.z = desired.z;
+  player.speed = Math.hypot(player.vel.x, player.vel.z);
+
+  // jump jets
+  if((keys[' ']||keys['jet']) && player.jet>0 && !shutdown){
+    player.vel.y = 42; player.jet -= player.jetRate*dt;
+  } else {
+    player.vel.y -= 90*dt;                 // gravity
+    if(player.jet<player.jetMax) player.jet += player.jetRate*0.5*dt;
+  }
+  player.jet=clamp(player.jet,0,player.jetMax);
+
+  // integrate
+  const next = player.pos.clone();
+  next.x += player.vel.x*dt; next.z += player.vel.z*dt; next.y += player.vel.y*dt;
+  if(next.y<0){ next.y=0; player.vel.y=0; }
+  // arena bounds
+  next.x=clamp(next.x,-ARENA,ARENA); next.z=clamp(next.z,-ARENA,ARENA);
+  // obstacle push-out (player radius ~10)
+  for(const o of obstacles){
+    if(Math.abs(next.x-o.x)<o.hw && Math.abs(next.z-o.z)<o.hd && next.y<(o.mesh.geometry.parameters.height||80)){
+      const dx=next.x-o.x, dz=next.z-o.z;
+      if(Math.abs(dx)/o.hw > Math.abs(dz)/o.hd){ next.x = o.x + Math.sign(dx)*o.hw; }
+      else { next.z = o.z + Math.sign(dz)*o.hd; }
+    }
+  }
+  player.pos.copy(next);
+
+  // ---- camera (cockpit) ----
+  camera.position.set(player.pos.x, player.pos.y+player.eye, player.pos.z);
+  const dir = new THREE.Vector3(
+    Math.sin(player.yaw)*Math.cos(player.pitch)*-1,
+    Math.sin(player.pitch),
+    Math.cos(player.yaw)*Math.cos(player.pitch)*-1
+  );
+  camera.lookAt(camera.position.clone().add(dir));
+
+  // ---- heat ----
+  player.heat = clamp(player.heat - player.cool*dt*(shutdown?2.2:1), 0, player.maxHeat);
+  if(shutdown && player.heat < player.maxHeat*0.4){ /* reboot */ ticker('リアクター再起動'); }
+
+  // ---- weapons cooldown ----
+  for(const w of player.weapons) if(w.cd>0) w.cd=Math.max(0,w.cd-dt);
+  // ---- sustained fire (hold trigger) ----
+  if(!shutdown){ if(fireHeld[1]) fireGroup(1); if(fireHeld[2]) fireGroup(2); }
+
+  // ---- targeting auto-pick if none ----
+  if(!target || !target.alive) pickTarget();
+
+  // ---- enemies ----
+  for(const e of enemies){
+    if(!e.alive) continue;
+    const f=e.def;
+    const toP = player.pos.clone().sub(e.pos); toP.y=0;
+    const distP = toP.length(); toP.normalize();
+    // desired range band
+    const band = f.range*0.7;
+    let mv = toP.clone();
+    if(distP < band) mv.multiplyScalar(-1);            // back off
+    else if(distP < band*1.15) mv.set(-toP.z,0,toP.x); // strafe
+    // move
+    const step = mv.multiplyScalar(f.speed*dt);
+    const en = e.pos.clone().add(step);
+    en.x=clamp(en.x,-ARENA,ARENA); en.z=clamp(en.z,-ARENA,ARENA);
+    let blocked=false;
+    for(const o of obstacles){ if(Math.abs(en.x-o.x)<o.hw && Math.abs(en.z-o.z)<o.hd){ blocked=true; break; } }
+    if(!blocked) e.pos.copy(en);
+    e.grp.position.copy(e.pos);
+    e.grp.rotation.y = Math.atan2(player.pos.x-e.pos.x, player.pos.z-e.pos.z);
+    // fire
+    e.fireCd -= dt;
+    if(e.fireCd<=0 && distP < f.range){
+      enemyFire(e); e.fireCd = f.fireCd*(0.8+Math.random()*0.6);
+    }
+  }
+
+  // ---- projectiles ----
+  for(let i=projectiles.length-1;i>=0;i--){
+    const p=projectiles[i];
+    if(p.homing && p.homing.alive){
+      const tc=p.homing.pos.clone(); tc.y=20; const want=tc.sub(p.mesh.position).normalize().multiplyScalar(p.vel.length());
+      p.vel.lerp(want, 0.08);
+    }
+    const stepv=p.vel.clone().multiplyScalar(dt);
+    p.mesh.position.add(stepv); p.traveled += stepv.length();
+    let dead = p.traveled>p.range || p.mesh.position.y<0;
+    // obstacle hit
+    if(!dead) for(const o of obstacles){ if(Math.abs(p.mesh.position.x-o.x)<o.hw-6 && Math.abs(p.mesh.position.z-o.z)<o.hd-6 && p.mesh.position.y<(o.mesh.geometry.parameters.height||80)){ dead=true; break; } }
+    if(!dead){
+      if(p.owner==='player'){
+        for(const e of enemies){ if(!e.alive) continue;
+          const c=e.pos.clone(); c.y=20*e.def.scale;
+          if(p.mesh.position.distanceTo(c) < 12*e.def.scale){
+            damageEnemy(e, p.dmg);
+            if(p.splash){ for(const e2 of enemies){ if(e2!==e&&e2.alive){ const c2=e2.pos.clone(); c2.y=20; if(p.mesh.position.distanceTo(c2)<40) damageEnemy(e2,p.splash);} } }
+            dead=true; break;
+          }
+        }
+      } else {
+        const c=player.pos.clone(); c.y=player.eye;
+        if(p.mesh.position.distanceTo(c) < 11){ hurtPlayer(p.dmg); dead=true; }
+      }
+    }
+    if(dead){ scene.remove(p.mesh); projectiles.splice(i,1); }
+  }
+
+  // ---- beams fade ----
+  for(let i=beams.length-1;i>=0;i--){ beams[i].life-=dt; if(beams[i].life<=0) beams.splice(i,1); }
+  // ---- explosions ----
+  for(let i=explosions.length-1;i>=0;i--){ const e=explosions[i]; e.t+=dt; const k=e.t/e.life;
+    e.mesh.scale.setScalar(1+k*3); e.mesh.material.opacity=0.9*(1-k);
+    if(k>=1){ scene.remove(e.mesh); explosions.splice(i,1);} }
+
+  if(invuln>0) invuln-=dt;
+
+  updateHUD();
+}
+
+function pickTarget(){
+  let best=null, bestScore=1e9;
+  const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+  for(const e of enemies){ if(!e.alive) continue;
+    const to=e.pos.clone().sub(player.pos); to.y=0; const d=to.length();
+    const ang = to.normalize().dot(new THREE.Vector3(dir.x,0,dir.z).normalize());
+    const score = d*(1.4-ang);   // prefer close + ahead
+    if(score<bestScore){ bestScore=score; best=e; }
+  }
+  target=best;
+}
+function cycleTarget(){
+  const live=enemies.filter(e=>e.alive); if(!live.length){target=null;return;}
+  let idx=live.indexOf(target); idx=(idx+1)%live.length; target=live[idx];
+}
+
+/* ============================================================
+   HUD render (DOM + overlay canvas)
+   ============================================================ */
+function updateHUD(){
+  $('#chassisName').textContent = player.chassis.name;
+  const ap = player.armor/player.maxArmor*100, sp=player.structure/player.maxStructure*100;
+  $('#armorBar').style.width=ap+'%'; $('#armorTxt').textContent=Math.round(ap)+'%';
+  $('#structBar').style.width=sp+'%'; $('#structTxt').textContent=Math.round(sp)+'%';
+  $('#spdTxt').textContent=Math.round(player.speed)+' km/h';
+  const hp=player.heat/player.maxHeat*100;
+  $('#heatBar').style.width=hp+'%'; $('#heatTxt').textContent=Math.round(hp)+'%';
+  $('#heatTxt').className = hp>=100?'val blink':(hp>80?'val':'val');
+  $('#heatTxt').style.color = hp>=85?'var(--red)':'var(--phos)';
+  const jp=player.jet/player.jetMax*100; $('#jetBar').style.width=jp+'%'; $('#jetTxt').textContent=Math.round(jp)+'%';
+
+  // weapon list
+  const wl=$('#weaponList'); wl.innerHTML='';
+  for(const w of player.weapons){
+    const d=w.def;
+    const row=document.createElement('div');
+    let cls='wpn'; if(w.cd>0) cls+=' cool'; if(d.ammo>0 && w.ammo<=0) cls+=' empty';
+    row.className=cls;
+    const ammo = d.ammo>0 ? `<span class="am">${w.ammo}</span>` : `<span class="am">∞</span>`;
+    row.innerHTML=`<span class="grp">${w.grp}</span><span class="nm">${d.name}</span>${ammo}`;
+    wl.appendChild(row);
+  }
+
+  // target panel
+  if(target && target.alive){
+    $('#targetBox').classList.add('on');
+    $('#tName').textContent=target.def.name;
+    const dist=Math.round(player.pos.distanceTo(target.pos));
+    $('#tDist').textContent=dist;
+    const ta=target.hp/target.maxhp*100; $('#tArmor').style.width=ta+'%'; $('#tArmorTxt').textContent=Math.round(ta)+'%';
+  } else $('#targetBox').classList.remove('on');
+
+  drawOverlay();
+  drawRadar();
+}
+
+function drawOverlay(){
+  const cv=$('#overlay'), ctx=cv.getContext('2d'); const w=cv.width,h=cv.height;
+  ctx.clearRect(0,0,w,h);
+  // beams
+  for(const b of beams){
+    const a=worldToScreen(b.a), e=worldToScreen(b.b);
+    if(a&&e){ ctx.strokeStyle='#'+b.color.toString(16).padStart(6,'0'); ctx.lineWidth=2.5; ctx.globalAlpha=0.9;
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(e.x,e.y); ctx.stroke(); ctx.globalAlpha=1; }
+  }
+  // target reticle box + leads on all enemies
+  for(const en of enemies){ if(!en.alive) continue;
+    const c=en.pos.clone(); c.y=20*en.def.scale; const s=worldToScreen(c);
+    if(!s) continue;
+    const isT = en===target;
+    const r = clamp(2400/s.z, 14, 90);
+    ctx.strokeStyle = isT? '#37d6ff' : 'rgba(255,90,80,.55)';
+    ctx.lineWidth = isT?2:1;
+    const len=r*0.4;
+    // corner brackets
+    const x0=s.x-r,y0=s.y-r,x1=s.x+r,y1=s.y+r;
+    ctx.beginPath();
+    ctx.moveTo(x0,y0+len);ctx.lineTo(x0,y0);ctx.lineTo(x0+len,y0);
+    ctx.moveTo(x1-len,y0);ctx.lineTo(x1,y0);ctx.lineTo(x1,y0+len);
+    ctx.moveTo(x1,y1-len);ctx.lineTo(x1,y1);ctx.lineTo(x1-len,y1);
+    ctx.moveTo(x0+len,y1);ctx.lineTo(x0,y1);ctx.lineTo(x0,y1-len);
+    ctx.stroke();
+    if(isT){ ctx.fillStyle='#37d6ff'; ctx.font='11px Orbitron, monospace'; ctx.fillText(en.def.name.toUpperCase(), x0, y0-6); }
+  }
+  // crosshair
+  const cx=w/2, cy=h/2;
+  const inRange = target && target.alive && player.pos.distanceTo(target.pos) < 600;
+  ctx.strokeStyle = inRange? '#3dff7a':'#2f6b46';
+  ctx.lineWidth=2; ctx.beginPath();
+  ctx.arc(cx,cy,16,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx-26,cy);ctx.lineTo(cx-8,cy); ctx.moveTo(cx+8,cy);ctx.lineTo(cx+26,cy);
+  ctx.moveTo(cx,cy-26);ctx.lineTo(cx,cy-8); ctx.moveTo(cx,cy+8);ctx.lineTo(cx,cy+26);
+  ctx.stroke();
+  ctx.fillStyle=inRange?'#3dff7a':'#2f6b46'; ctx.fillRect(cx-1.5,cy-1.5,3,3);
+}
+function worldToScreen(v){
+  const p=v.clone().project(camera);
+  if(p.z>1) return null;
+  return {x:(p.x*0.5+0.5)*$('#overlay').width, y:(-p.y*0.5+0.5)*$('#overlay').height, z:camera.position.distanceTo(v)};
+}
+function drawRadar(){
+  const cv=$('#radar'), ctx=cv.getContext('2d'); const S=120, R=56, cx=S/2, cy=S/2;
+  ctx.clearRect(0,0,S,S);
+  ctx.fillStyle='rgba(6,12,8,.9)'; ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#1c7c3e'; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx,cy,R*0.55,0,Math.PI*2); ctx.stroke();
+  ctx.strokeStyle='#143a22'; ctx.beginPath(); ctx.moveTo(cx-R,cy);ctx.lineTo(cx+R,cy);ctx.moveTo(cx,cy-R);ctx.lineTo(cx,cy+R);ctx.stroke();
+  // sweep
+  const sw=(performance.now()/900)%(Math.PI*2);
+  ctx.strokeStyle='rgba(61,255,122,.5)'; ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx+Math.cos(sw)*R, cy+Math.sin(sw)*R); ctx.stroke();
+  // blips
+  const scaleR = R/ (ARENA*0.9);
+  for(const e of enemies){ if(!e.alive) continue;
+    const dx=e.pos.x-player.pos.x, dz=e.pos.z-player.pos.z;
+    // rotate into player's heading (yaw 0 => forward -Z is up)
+    const c=Math.cos(player.yaw), s=Math.sin(player.yaw);
+    const rx = dx*c - dz*s;
+    const rz = dx*s + dz*c;
+    let bx=cx + rx*scaleR, by=cy + rz*scaleR;
+    const m=Math.hypot(rx,rz)*scaleR;
+    if(m>R){ bx=cx+rx*scaleR*R/m; by=cy+rz*scaleR*R/m; }
+    ctx.fillStyle = e===target?'#37d6ff':'#ff5a50';
+    ctx.fillRect(bx-2,by-2,4,4);
+  }
+  // player
+  ctx.fillStyle='#3dff7a'; ctx.beginPath(); ctx.moveTo(cx,cy-5); ctx.lineTo(cx-4,cy+4); ctx.lineTo(cx+4,cy+4); ctx.fill();
+}
+
+/* ---------- messages ---------- */
+let msgT=null;
+function bigMsg(t){ const m=$('#msgBig'); m.textContent=t; m.style.opacity='1'; clearTimeout(msgT); msgT=setTimeout(()=>m.style.opacity='0',1600); }
+function ticker(t){ $('#ticker').textContent=t; }
+
+/* ============================================================
+   RENDER LOOP
+   ============================================================ */
+function loop(){
+  requestAnimationFrame(loop);
+  const dt=Math.min(clock.getDelta(),0.05);
+  try{ update(dt); }catch(e){ console.warn('update',e); }
+  try{ renderer.render(scene,camera); }catch(e){ console.warn('render',e); }
+}
+
+/* ============================================================
+   MODES / SCREENS
+   ============================================================ */
+function setMode(m){
+  STATE.mode=m;
+  $('#hud').classList.toggle('on', m==='playing');
+  $('#touch').classList.toggle('on', m==='playing' && isTouch);
+  if(m==='playing'){ hideAllScreens(); }
+}
+function hideAllScreens(){ $$('.screen').forEach(s=>s.classList.remove('on')); }
+function showScreen(id){ hideAllScreens(); $('#'+id).classList.add('on'); }
+function exitToScreen(){ setMode('menu'); document.exitPointerLock&&document.exitPointerLock(); }
+
+/* ---------- TITLE ---------- */
+function refreshTitle(){
+  const s=SAVE.stats;
+  $('#titleStats').innerHTML =
+    `パイロット記録 — 撃破 <b>${s.kills}</b> · 達成契約 <b>${s.missions}</b> · 喪失機体 <b>${s.deaths}</b><br>`+
+    `資金: <span class="credits">${fmt(SAVE.credits)} C-bills</span> · 搭乗機: <b>${CHASSIS[SAVE.current].name}</b>`;
+}
+
+/* ---------- MISSIONS ---------- */
+function renderMissions(){
+  $('#missCredits').textContent=fmt(SAVE.credits)+' C-bills';
+  const wrap=$('#missList'); wrap.innerHTML='';
+  MISSIONS.forEach(m=>{
+    const locked = m.id>SAVE.unlockedMission;
+    const row=document.createElement('div'); row.className='mrow';
+    row.innerHTML=`<div class="mi"><div class="t">${m.name}</div>
+      <div class="d">${m.waves.length} ウェーブ · 報酬 ${fmt(m.reward)} C-bills + サルベージ</div></div>
+      <div class="difficulty" style="color:${locked?'#5e7a64':'var(--amber)'}">${m.diff}</div>`;
+    const btn=document.createElement('button'); btn.className='btn'; btn.textContent=locked?'ロック':'説明';
+    btn.disabled=locked;
+    btn.onclick=()=>openBrief(m.id);
+    row.appendChild(btn); wrap.appendChild(row);
+  });
+}
+function openBrief(mi){
+  const m=MISSIONS[mi]; window._brief=mi;
+  $('#brTitle').textContent=m.name;
+  $('#brDesc').textContent='作戦区域で敵ランス（部隊）を確認。全ウェーブの敵メックを撃破せよ。掃討確認後に味方が回収に向かう。';
+  $('#brWaves').innerHTML='交戦規模: <b>'+m.waves.length+' ウェーブ</b> / 敵総数 '+m.waves.reduce((a,w)=>a+w.length,0)+' 機';
+  $('#brReward').innerHTML='契約報酬: <b style="color:var(--amber)">'+fmt(m.reward)+' C-bills</b> + 撃破サルベージ 1機につき 5,000';
+  const cs=cstate(SAVE.current);
+  const armPct=Math.round(cs.armor/maxArmorOf(SAVE.current)*100);
+  $('#brMech').innerHTML=`搭乗機: <b>${CHASSIS[SAVE.current].name}</b> · 装甲 ${armPct}% · 武器 ${cstate(SAVE.current).loadout.length} 基装備`+
+    (armPct<60?' · <span style="color:var(--amber)">修理を推奨</span>':'');
+  showScreen('scrBrief');
+}
+
+/* ---------- RESULTS ---------- */
+function showResult(win, reward){
+  showScreen('scrResult');
+  $('#resTitle').textContent = win?'ミッション完了':'機体大破';
+  $('#resTitle').style.color = win?'var(--phos)':'var(--red)';
+  $('#resTitle').style.textShadow = win?'0 0 26px rgba(61,255,122,.4)':'0 0 26px rgba(255,58,47,.4)';
+  if(win){
+    $('#resBody').innerHTML =
+      `敵撃破数: <b>${killsThisMission}</b><br>`+
+      `被ダメージ: <b>${Math.round(missionStartArmor-player.armor)}</b> 装甲<br>`+
+      `報酬: <span class="credits">${fmt(reward)} C-bills</span><br>`+
+      `資金: <b>${fmt(SAVE.credits)} C-bills</b>`;
+  } else {
+    $('#resBody').innerHTML =
+      `<b>${killsThisMission}</b> 機を撃破後、あなたの機体は撃墜された。<br>`+
+      `機体は回収可能だが、再出撃の前に整備ベイで修理が必要だ。<br>`+
+      `資金: <b>${fmt(SAVE.credits)} C-bills</b>`;
+  }
+}
+
+/* ============================================================
+   MECH LAB UI
+   ============================================================ */
+let labTab='loadout';
+function openLab(){ showScreen('scrLab'); switchTab(labTab); renderLab(); }
+function switchTab(t){
+  labTab=t;
+  $$('.tab').forEach(x=>x.classList.toggle('on', x.dataset.tab===t));
+  $('#tabLoadout').style.display = t==='loadout'?'block':'none';
+  $('#tabArsenal').style.display = t==='arsenal'?'block':'none';
+  $('#tabBay').style.display = t==='bay'?'block':'none';
+}
+function renderLab(){
+  $('#labCredits').textContent=fmt(SAVE.credits)+' C-bills';
+  renderLoadout(); renderArsenal(); renderBay();
+}
+function renderLoadout(){
+  const id=SAVE.current, ch=CHASSIS[id], cs=cstate(id);
+  $('#loChassis').textContent=ch.name+' ('+ch.cls+')';
+  const sl=$('#slotList'); sl.innerHTML='';
+  for(let i=0;i<ch.slots;i++){
+    const w=cs.loadout[i];
+    const line=document.createElement('div');
+    if(w){
+      const d=WEAPONS[w.id];
+      line.className='slotline';
+      line.innerHTML=`<span class="tag ${d.type}">${TYPE_JP[d.type]||d.type}</span>
+        <div class="nm2"><div class="t">${d.name}</div><div class="d">${d.dmg} ダメージ · ${d.heat} 熱 · ${d.ton}t${d.ammo?(' · '+d.ammo+' 発'):''}</div></div>`;
+      const gbtn=document.createElement('button'); gbtn.className='mini grp'; gbtn.textContent='G'+(w.grp||1);
+      gbtn.title='トリガーグループ切替';
+      gbtn.onclick=()=>{ w.grp = (w.grp===1?2:1); persist(); renderLoadout(); };
+      const rm=document.createElement('button'); rm.className='mini rm'; rm.textContent='外す';
+      rm.onclick=()=>{ SAVE.inventory.push(w.id); cs.loadout.splice(i,1); persist(); renderLab(); };
+      line.appendChild(gbtn); line.appendChild(rm);
+    } else {
+      line.className='slotline free';
+      line.innerHTML=`<span class="tag" style="border:1px dashed #2a3a2d;color:#5e7a64;">スロット ${i+1}</span><div class="nm2"><div class="d">空きハードポイント</div></div>`;
+    }
+    sl.appendChild(line);
+  }
+  const ton=tonnageUsed(id), over=ton>ch.ton;
+  $('#gTon').classList.toggle('over',over);
+  $('#gTon').querySelector('b').textContent=`${ton} / ${ch.ton} t`;
+  const ah=alphaHeat(id), cool=coolOf(id);
+  $('#gHeat').classList.toggle('over', ah>cool*4);
+  $('#gHeat').querySelector('b').textContent=`${ah} 熱`;
+  $('#gCool').textContent=`${cool.toFixed(1)}/s`;
+}
+function renderArsenalList(targetEl, forFitting){
+  targetEl.innerHTML='';
+  const id=SAVE.current, ch=CHASSIS[id], cs=cstate(id);
+  // count inventory
+  const counts={}; SAVE.inventory.forEach(w=>counts[w]=(counts[w]||0)+1);
+  const ids=Object.keys(counts);
+  if(forFitting){
+    if(!ids.length){ $('#invEmpty').style.display='block'; return; } else $('#invEmpty').style.display='none';
+  }
+  ids.forEach(wid=>{
+    const d=WEAPONS[wid];
+    const line=document.createElement('div'); line.className='itemline';
+    line.innerHTML=`<span class="tag ${d.type}">${TYPE_JP[d.type]||d.type}</span>
+      <div class="nm2"><div class="t">${d.name} <span style="color:#7fa389">×${counts[wid]}</span></div>
+      <div class="d">${d.dmg} ダメージ · ${d.heat} 熱 · ${d.ton}t · 射程 ${d.range}${d.count?(' · ×'+d.count):''}</div></div>`;
+    const slotsFree = cs.loadout.length < ch.slots;
+    const tonOk = tonnageUsed(id)+d.ton <= ch.ton;
+    const fit=document.createElement('button'); fit.className='mini'; fit.textContent='装備';
+    fit.disabled=!(slotsFree&&tonOk);
+    if(!slotsFree) fit.title='ハードポイントに空きなし';
+    else if(!tonOk) fit.title='トン数超過';
+    fit.onclick=()=>{
+      const idx=SAVE.inventory.indexOf(wid); if(idx>=0) SAVE.inventory.splice(idx,1);
+      cs.loadout.push({id:wid, grp: d.type==='energy'?1:2});
+      persist(); renderLab();
+    };
+    line.appendChild(fit); targetEl.appendChild(line);
+  });
+}
+function renderArsenal(){
+  renderArsenalList($('#invList'), true);   // fit-from-inventory column in loadout tab
+  // shop
+  const shop=$('#shopWeapons'); shop.innerHTML='';
+  Object.values(WEAPONS).forEach(d=>{
+    const line=document.createElement('div'); line.className='itemline';
+    line.innerHTML=`<span class="tag ${d.type}">${TYPE_JP[d.type]||d.type}</span>
+      <div class="nm2"><div class="t">${d.name}</div>
+      <div class="d">${d.dmg} ダメージ · ${d.heat} 熱 · ${d.ton}t · 射程 ${d.range}${d.ammo?(' · '+d.ammo+' 発'):' · 弾薬不要'}${d.count?(' · ×'+d.count):''}</div></div>
+      <span class="price">${fmt(d.cost)}</span>`;
+    const buy=document.createElement('button'); buy.className='mini'; buy.textContent='購入';
+    buy.disabled=SAVE.credits<d.cost;
+    buy.onclick=()=>{ if(SAVE.credits<d.cost) return; SAVE.credits-=d.cost; SAVE.inventory.push(d.id); persist(); toast(d.name+' を購入'); renderLab(); };
+    line.appendChild(buy); shop.appendChild(line);
+  });
+}
+function renderBay(){
+  const id=SAVE.current, ch=CHASSIS[id], cs=cstate(id);
+  // repair
+  const max=maxArmorOf(id); const missing=Math.max(0,max-cs.armor);
+  const repCost=Math.round(missing*120);
+  $('#repArmor').textContent=`${Math.round(cs.armor)} / ${max} （修理 ${fmt(repCost)} C-bills）`;
+  const rb=$('#btnRepair'); rb.disabled = missing<=0 || SAVE.credits<repCost;
+  rb.textContent = missing<=0?'装甲は最大':'装甲を修理 — '+fmt(repCost);
+  rb.onclick=()=>{ if(SAVE.credits<repCost||missing<=0) return; SAVE.credits-=repCost; cs.armor=max; persist(); toast('装甲を回復'); renderLab(); };
+  // cooling
+  const coolPrice=50000*(cs.coolLv+1);
+  $('#coolLv').textContent='Lv'+cs.coolLv;
+  $('#coolDesc').textContent=`放熱 ${coolOf(id).toFixed(1)}/s → ${(coolOf(id)+2.5).toFixed(1)}/s`;
+  $('#coolPrice').textContent=fmt(coolPrice);
+  const cb=$('#btnCool'); cb.disabled=SAVE.credits<coolPrice||cs.coolLv>=6;
+  cb.onclick=()=>{ if(SAVE.credits<coolPrice) return; SAVE.credits-=coolPrice; cs.coolLv++; persist(); toast('冷却を強化'); renderLab(); };
+  // armor upgrade
+  const armPrice=60000*(cs.armorLv+1);
+  $('#armLv').textContent='Lv'+cs.armorLv;
+  $('#armDesc').textContent=`最大装甲 ${maxArmorOf(id)} → ${maxArmorOf(id)+40}`;
+  $('#armPrice').textContent=fmt(armPrice);
+  const ab=$('#btnArm'); ab.disabled=SAVE.credits<armPrice||cs.armorLv>=8;
+  ab.onclick=()=>{ if(SAVE.credits<armPrice) return; SAVE.credits-=armPrice; cs.armorLv++; cs.armor=maxArmorOf(id); persist(); toast('装甲板を強化'); renderLab(); };
+  // chassis bay
+  const cl=$('#chassisList'); cl.innerHTML='';
+  Object.values(CHASSIS).forEach(c=>{
+    const owned=SAVE.ownedChassis.includes(c.id), active=SAVE.current===c.id;
+    const line=document.createElement('div'); line.className='itemline';
+    line.innerHTML=`<div class="nm2"><div class="t">${c.name} <span style="color:#7fa389">${c.cls}</span></div>
+      <div class="d">${c.ton}t · ハードポイント ${c.slots} · 装甲 ${c.maxArmorBase} · 速度 ${c.speed} · 冷却 ${c.baseCool}/s</div></div>
+      ${owned?'':'<span class="price">'+fmt(c.cost)+'</span>'}`;
+    const btn=document.createElement('button'); btn.className='mini';
+    if(active){ btn.textContent='使用中'; btn.disabled=true; }
+    else if(owned){ btn.textContent='選択'; btn.onclick=()=>{ SAVE.current=c.id; cstate(c.id); persist(); toast(c.name+' に搭乗'); renderLab(); }; }
+    else { btn.textContent='購入'; btn.disabled=SAVE.credits<c.cost;
+      btn.onclick=()=>{ if(SAVE.credits<c.cost) return; SAVE.credits-=c.cost; SAVE.ownedChassis.push(c.id); cstate(c.id); persist(); toast(c.name+' を取得'); renderLab(); }; }
+    line.appendChild(btn); cl.appendChild(line);
+  });
+}
+
+/* ============================================================
+   INPUT
+   ============================================================ */
+let touchPref = (SAVE.settings && SAVE.settings.touchMode) || 'auto';
+function computeTouch(){
+  if(touchPref==='touch') return true;
+  if(touchPref==='mouse') return false;
+  return ('ontouchstart' in window) || navigator.maxTouchPoints>0 || (window.matchMedia && matchMedia('(pointer:coarse)').matches);
+}
+let isTouch = computeTouch();
+let pointerLocked=false;
+const fireHeld={1:false,2:false};   // hold-to-fire for both touch and mouse
+
+function setTouchMode(mode){
+  touchPref=mode; SAVE.settings.touchMode=mode; persist();
+  isTouch=computeTouch();
+  document.exitPointerLock && document.exitPointerLock();
+  if(STATE.mode==='playing'){ $('#touch').classList.toggle('on', isTouch); }
+  refreshModeButtons();
+}
+function refreshModeButtons(){
+  const lbl = touchPref==='auto' ? ('自動（'+(isTouch?'タッチ':'マウス')+'）') : (touchPref==='touch'?'タッチ':'マウス');
+  $$('.modeBtn').forEach(b=>b.textContent='操作: '+lbl);
+}
+
+function initInput(){
+  // keyboard
+  addEventListener('keydown', e=>{
+    const k=e.key.toLowerCase();
+    keys[k]=true;
+    if(STATE.mode==='playing'){
+      if(k==='1'){ fireHeld[1]=true; }
+      if(k==='2'){ fireHeld[2]=true; }
+      if(k==='r'||k==='tab'){ e.preventDefault(); cycleTarget(); }
+      if(k==='escape'){ pauseGame(); }
+      if(k==='w'||k==='a'||k==='s'||k==='d'||k===' ') e.preventDefault();
+    }
+  });
+  addEventListener('keyup', e=>{ const k=e.key.toLowerCase(); keys[k]=false; if(k==='1')fireHeld[1]=false; if(k==='2')fireHeld[2]=false; });
+
+  // mouse look (pointer lock)
+  const cv=$('#scene');
+  cv.addEventListener('click', ()=>{ if(STATE.mode==='playing' && !isTouch && !pointerLocked) cv.requestPointerLock(); });
+  document.addEventListener('pointerlockchange', ()=>{ pointerLocked = (document.pointerLockElement===cv); if(!pointerLocked){ fireHeld[1]=fireHeld[2]=false; } });
+  addEventListener('mousemove', e=>{ if(pointerLocked){ look.x+=e.movementX; look.y+=e.movementY; } });
+  addEventListener('mousedown', e=>{ if(STATE.mode==='playing' && pointerLocked){ if(e.button===0) fireHeld[1]=true; if(e.button===2) fireHeld[2]=true; } });
+  addEventListener('mouseup', e=>{ if(e.button===0) fireHeld[1]=false; if(e.button===2) fireHeld[2]=false; });
+  addEventListener('contextmenu', e=>{ if(STATE.mode==='playing') e.preventDefault(); });
+
+  initTouch();   // listeners are harmless when the touch panel is hidden
+}
+
+function initTouch(){
+  const press=(el,on)=>el.classList.toggle('press',on);
+  // movement stick
+  const stick=$('#stick'), nub=$('#stickNub'); let sid=null, sc={x:0,y:0};
+  stick.addEventListener('touchstart', e=>{ e.preventDefault(); const t=e.changedTouches[0]; sid=t.identifier; const r=stick.getBoundingClientRect(); sc={x:r.left+r.width/2, y:r.top+r.height/2}; }, {passive:false});
+  addEventListener('touchmove', e=>{
+    for(const t of e.changedTouches){
+      if(t.identifier===sid){
+        let dx=t.clientX-sc.x, dy=t.clientY-sc.y; const m=Math.hypot(dx,dy), lim=62, dead=8;
+        if(m>lim){ dx*=lim/m; dy*=lim/m; }
+        nub.style.transform=`translate(${dx}px,${dy}px)`;
+        moveVec.x = Math.abs(dx)<dead?0:dx/lim;
+        moveVec.y = Math.abs(dy)<dead?0:dy/lim;
+      }
+    }
+  }, {passive:false});
+  const stickEnd=e=>{ for(const t of e.changedTouches){ if(t.identifier===sid){ sid=null; moveVec.x=0; moveVec.y=0; nub.style.transform='translate(0,0)'; } } };
+  addEventListener('touchend', stickEnd); addEventListener('touchcancel', stickEnd);
+
+  // look zone (drag to aim)
+  const lz=$('#lookzone'); let lid=null, lp={x:0,y:0};
+  lz.addEventListener('touchstart', e=>{ e.preventDefault(); const t=e.changedTouches[0]; lid=t.identifier; lp={x:t.clientX,y:t.clientY}; }, {passive:false});
+  addEventListener('touchmove', e=>{ for(const t of e.changedTouches){ if(t.identifier===lid){ look.x+=(t.clientX-lp.x)*1.25; look.y+=(t.clientY-lp.y)*1.25; lp={x:t.clientX,y:t.clientY}; } } }, {passive:false});
+  const lookEnd=e=>{ for(const t of e.changedTouches){ if(t.identifier===lid) lid=null; } };
+  addEventListener('touchend', lookEnd); addEventListener('touchcancel', lookEnd);
+
+  // fire buttons — hold to fire
+  const trigger=(el,grp)=>{
+    el.addEventListener('touchstart',e=>{e.preventDefault(); fireHeld[grp]=true; press(el,true);},{passive:false});
+    const up=e=>{e.preventDefault(); fireHeld[grp]=false; press(el,false);};
+    el.addEventListener('touchend',up,{passive:false}); el.addEventListener('touchcancel',up,{passive:false});
+  };
+  trigger($('#fire1'),1); trigger($('#fire2'),2);
+  // jump jet — hold
+  const jet=$('#jet');
+  jet.addEventListener('touchstart',e=>{e.preventDefault(); keys['jet']=true; press(jet,true);},{passive:false});
+  const jetUp=e=>{e.preventDefault(); keys['jet']=false; press(jet,false);};
+  jet.addEventListener('touchend',jetUp,{passive:false}); jet.addEventListener('touchcancel',jetUp,{passive:false});
+  // tap buttons
+  const tap=(el,fn)=>{ el.addEventListener('touchstart',e=>{e.preventDefault(); press(el,true); fn();},{passive:false});
+    const up=()=>press(el,false); el.addEventListener('touchend',up); el.addEventListener('touchcancel',up); };
+  tap($('#cycle'), cycleTarget);
+  tap($('#pauseBtn'), pauseGame);
+}
+
+/* ---------- pause ---------- */
+function pauseGame(){
+  if(STATE.mode!=='playing') return;
+  STATE.mode='paused'; document.exitPointerLock&&document.exitPointerLock();
+  fireHeld[1]=fireHeld[2]=false; keys['jet']=false;
+  $('#hud').classList.remove('on'); $('#touch').classList.remove('on');
+  $('#sens').value=SAVE.settings.sens; $('#btnSound').textContent=SAVE.settings.sound?'オン':'オフ';
+  refreshModeButtons();
+  showScreen('scrPause');
+}
+function resumeGame(){ hideAllScreens(); STATE.mode='playing'; $('#hud').classList.add('on'); if(isTouch)$('#touch').classList.add('on'); if(!isTouch)$('#scene').requestPointerLock(); }
+
+/* ============================================================
+   WIRE UP UI
+   ============================================================ */
+function wireUI(){
+  $('#btnDeploy').onclick=()=>{ renderMissions(); showScreen('scrMissions'); };
+  $('#btnLab').onclick=()=>{ openLab(); };
+  $('#btnHelp').onclick=()=>{ renderKeys(); refreshModeButtons(); showScreen('scrHelp'); };
+  const cycleMode=()=>{ const order=['auto','touch','mouse']; const i=order.indexOf(touchPref); setTouchMode(order[(i+1)%3]); renderKeys(); };
+  $('#btnMode').onclick=cycleMode; $('#btnModeHelp').onclick=cycleMode;
+  $('#btnHelpBack').onclick=()=>{ refreshTitle(); showScreen('scrTitle'); };
+  $('#btnWipe').onclick=async ()=>{
+    if(!confirm('すべての進行状況とパイロット記録を消去しますか？')) return;
+    SAVE=DEFAULT_SAVE(); try{ await Store.set(SAVE_KEY, JSON.stringify(SAVE)); }catch(e){}
+    refreshTitle(); updateSaveStatus(); toast('セーブを消去しました');
+  };
+  // fullscreen (best-effort; iPad支持は限定的)
+  $('#btnFull').onclick=()=>{
+    const el=document.documentElement;
+    const req=el.requestFullscreen||el.webkitRequestFullscreen;
+    if(document.fullscreenElement||document.webkitFullscreenElement){ (document.exitFullscreen||document.webkitExitFullscreen).call(document); }
+    else if(req){ req.call(el).catch(()=>toast('この環境では全画面に未対応です',true)); }
+    else { toast('全画面はホーム画面に追加すると有効になります',true); }
+  };
+  // export save as downloadable JSON
+  $('#btnExport').onclick=()=>{
+    try{
+      const blob=new Blob([JSON.stringify(SAVE,null,2)],{type:'application/json'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      const d=new Date(); const stamp=d.getFullYear()+('0'+(d.getMonth()+1)).slice(-2)+('0'+d.getDate()).slice(-2);
+      a.href=url; a.download='steeldivision-save-'+stamp+'.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),2000);
+      toast('セーブを書き出しました');
+    }catch(e){ toast('エクスポートに失敗しました',true); }
+  };
+  // import save from a JSON file
+  $('#btnImport').onclick=()=>$('#importFile').click();
+  $('#importFile').onchange=e=>{
+    const f=e.target.files&&e.target.files[0]; if(!f) return;
+    const r=new FileReader();
+    r.onload=async()=>{
+      try{
+        const data=JSON.parse(r.result);
+        SAVE=sanitizeSave(data);
+        touchPref=(SAVE.settings&&SAVE.settings.touchMode)||'auto'; isTouch=computeTouch();
+        await Store.set(SAVE_KEY, JSON.stringify(SAVE));
+        refreshTitle(); updateSaveStatus(); refreshModeButtons();
+        toast('セーブを読み込みました');
+      }catch(err){ toast('読み込めないファイルです',true); }
+      e.target.value='';
+    };
+    r.readAsText(f);
+  };
+
+  $('#btnMissBack').onclick=()=>{ refreshTitle(); showScreen('scrTitle'); };
+  $('#btnToLab').onclick=()=>openLab();
+
+  // lab tabs
+  $$('.tab').forEach(t=>t.onclick=()=>switchTab(t.dataset.tab));
+  $('#btnLabBack').onclick=()=>{ refreshTitle(); showScreen('scrTitle'); };
+  $('#btnLabDeploy').onclick=()=>{ renderMissions(); showScreen('scrMissions'); };
+
+  // brief
+  $('#btnBriefBack').onclick=()=>{ renderMissions(); showScreen('scrMissions'); };
+  $('#btnBriefLab').onclick=()=>openLab();
+  $('#btnLaunch').onclick=()=>{
+    if(cstate(SAVE.current).loadout.length===0){ toast('メックラボで武器を1基以上装備してください',true); return; }
+    if(cstate(SAVE.current).armor<=0){ toast('先に整備ベイで装甲を修理してください',true); return; }
+    startMission(window._brief);
+    if(!isTouch) setTimeout(()=>$('#scene').requestPointerLock(),50);
+  };
+
+  // results
+  $('#btnResLab').onclick=()=>openLab();
+  $('#btnResNext').onclick=()=>{ renderMissions(); showScreen('scrMissions'); };
+
+  // pause
+  $('#btnResume').onclick=()=>resumeGame();
+  $('#btnAbort').onclick=()=>{ cstate(SAVE.current).armor=player.armor; persist(); exitToScreen(); refreshTitle(); showScreen('scrTitle'); };
+  $('#sens').oninput=e=>{ SAVE.settings.sens=+e.target.value; persist(); };
+  $('#btnSound').onclick=()=>{ SAVE.settings.sound=!SAVE.settings.sound; $('#btnSound').textContent=SAVE.settings.sound?'オン':'オフ'; persist(); if(SAVE.settings.sound) Audio.resume(); };
+}
+function renderKeys(){
+  const rows=[
+    ['W A S D','移動 / 横移動'],
+    ['マウス','視点・照準'],
+    ['左クリック / 1','トリガーグループ1で射撃'],
+    ['右クリック / 2','トリガーグループ2で射撃'],
+    ['Space','ジャンプジェット'],
+    ['R / Tab','目標切替'],
+    ['Esc','一時停止 / 設定'],
+  ];
+  const tm = isTouch? [['左スティック','移動'],['右側ドラッグ','視点・照準'],['射撃 1 / 射撃 2','武器グループ（長押し）'],['JET','ジャンプジェット（長押し）'],['目標 ▸','目標切替'],['❚❚','一時停止 / メニュー']] : rows;
+  const el=$('#keyList'); el.innerHTML='';
+  (isTouch?tm:rows).forEach(([k,v])=>{ const a=document.createElement('span'); a.innerHTML='<span class="kbd">'+k+'</span>'; const b=document.createElement('span'); b.textContent=v; el.appendChild(a); el.appendChild(b); });
+}
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+function fatal(msg){
+  // Never leave the player on a dead screen — show a reachable recovery panel.
+  const el=document.createElement('div');
+  el.style.cssText='position:fixed;inset:0;z-index:999;background:#060906;color:#cfe8d6;font-family:monospace;padding:28px;display:flex;flex-direction:column;gap:16px;align-items:center;justify-content:center;text-align:center';
+  el.innerHTML='<div style="font-family:Orbitron,monospace;font-weight:900;font-size:22px;color:#ff3a2f">システム障害</div>'+
+    '<div style="max-width:520px;line-height:1.7">'+msg+'</div>';
+  const b=document.createElement('button'); b.textContent='セーブを消去して再読込';
+  b.style.cssText='font-family:Orbitron,monospace;font-weight:700;letter-spacing:.1em;padding:14px 22px;background:#0e140f;color:#3dff7a;border:1px solid #1c7c3e;border-radius:4px';
+  b.onclick=async()=>{ try{ await Store.del(SAVE_KEY); }catch(e){} location.reload(); };
+  el.appendChild(b); document.body.appendChild(el);
+}
+async function boot(){
+  try{ await loadSave(); }catch(e){ SAVE = DEFAULT_SAVE(); }
+  touchPref = (SAVE.settings && SAVE.settings.touchMode) || 'auto';
+  isTouch = computeTouch();
+  // UI must come up regardless of 3D state so the player is never stuck.
+  try{ initInput(); }catch(e){ console.warn(e); }
+  try{ wireUI(); }catch(e){ console.warn(e); }
+  try{ refreshTitle(); refreshModeButtons(); updateSaveStatus(); }catch(e){ console.warn(e); }
+  try{
+    initThree();
+    loop();
+  }catch(e){
+    console.error(e);
+    fatal('この端末で3Dグラフィックを起動できませんでした。オフラインの場合は再接続して開き直してください。改善しない場合は下のボタンでセーブをリセットしてください。');
+  }
+}
+boot();
+</script>
+</body>
+</html>
