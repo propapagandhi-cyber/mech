@@ -1102,13 +1102,26 @@ function update(dt){
     let mv = toP.clone();
     if(distP < band) mv.multiplyScalar(-1);            // back off
     else if(distP < band*1.15) mv.set(-toP.z,0,toP.x); // strafe
-    // move
+    // move — with wall-sliding and escape so enemies never get stuck in/against buildings
     const step = mv.multiplyScalar(f.speed*dt);
-    const en = e.pos.clone().add(step);
-    en.x=clamp(en.x,-ARENA,ARENA); en.z=clamp(en.z,-ARENA,ARENA);
-    let blocked=false;
-    for(const o of obstacles){ if(Math.abs(en.x-o.x)<o.hw && Math.abs(en.z-o.z)<o.hd){ blocked=true; break; } }
-    if(!blocked) e.pos.copy(en);
+    const nx = clamp(e.pos.x+step.x,-ARENA,ARENA);
+    const nz = clamp(e.pos.z+step.z,-ARENA,ARENA);
+    const blocker = (x,z)=>{ for(const o of obstacles){ if(Math.abs(x-o.x)<o.hw && Math.abs(z-o.z)<o.hd) return o; } return null; };
+    const cur = blocker(e.pos.x, e.pos.z);
+    if(cur){
+      // embedded in a building footprint — shove out along the shallowest axis so it can escape
+      const dx = e.pos.x-cur.x, dz = e.pos.z-cur.z;
+      const penX = cur.hw-Math.abs(dx), penZ = cur.hd-Math.abs(dz);
+      if(penX < penZ) e.pos.x = cur.x + Math.sign(dx||1)*(cur.hw+0.5);
+      else            e.pos.z = cur.z + Math.sign(dz||1)*(cur.hd+0.5);
+    } else if(!blocker(nx,nz)){
+      e.pos.x=nx; e.pos.z=nz;                 // clear path
+    } else if(!blocker(nx,e.pos.z)){
+      e.pos.x=nx;                             // slide along Z wall
+    } else if(!blocker(e.pos.x,nz)){
+      e.pos.z=nz;                             // slide along X wall
+    }
+    e.pos.x=clamp(e.pos.x,-ARENA,ARENA); e.pos.z=clamp(e.pos.z,-ARENA,ARENA);
     e.grp.position.copy(e.pos);
     e.grp.rotation.y = Math.atan2(player.pos.x-e.pos.x, player.pos.z-e.pos.z);
     // fire
