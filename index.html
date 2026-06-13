@@ -305,6 +305,8 @@
 
     <div id="msg"><div class="big" id="msgBig"></div></div>
     <div id="ticker"></div>
+    <div id="gpDbg" style="position:absolute;left:50%;top:2px;transform:translateX(-50%);z-index:8;display:none;
+      font:11px/1.3 'Share Tech Mono',monospace;color:#8de0a4;background:rgba(4,8,5,.7);padding:2px 8px;border:1px solid #1c7c3e;border-radius:3px;pointer-events:none;white-space:nowrap;"></div>
   </div>
 
   <!-- touch controls -->
@@ -1546,8 +1548,11 @@ function ticker(t){ $('#ticker').textContent=t; }
    ============================================================ */
 function loop(){
   requestAnimationFrame(loop);
+  frameCount++;
   const dt=Math.min(clock.getDelta(),0.05);
+  try{ pollGamepad(dt); }catch(e){ /* no gamepad / API absent */ }
   try{ update(dt); }catch(e){ console.warn('update',e); }
+  try{ updateGpDebug(); }catch(e){}
   try{ renderer.render(scene,camera); }catch(e){ console.warn('render',e); }
 }
 
@@ -1557,8 +1562,8 @@ function loop(){
 function setMode(m){
   STATE.mode=m;
   $('#hud').classList.toggle('on', m==='playing');
-  $('#hud').classList.toggle('touchui', isTouch);   // touch: move panels clear of thumb buttons
-  $('#touch').classList.toggle('on', m==='playing' && isTouch);
+  $('#hud').classList.toggle('touchui', isTouch && !gpConnected);   // touch: move panels clear of thumb buttons
+  $('#touch').classList.toggle('on', m==='playing' && isTouch && !gpConnected);
   if(m==='playing'){ hideAllScreens(); }
 }
 function hideAllScreens(){ $$('.screen').forEach(s=>s.classList.remove('on')); }
@@ -1766,6 +1771,10 @@ function computeTouch(){
 }
 let isTouch = computeTouch();
 let pointerLocked=false;
+let gpConnected=false;          // a gamepad (Switch Pro等) is present
+let gpLastSeen=0;               // performance.now() of last readable frame
+let gpStamp=-1;                 // last gamepad.timestamp seen (to detect stalls)
+let frameCount=0;               // rAF heartbeat — proves the loop is alive
 const fireHeld={1:false,2:false};   // hold-to-fire for both touch and mouse
 
 function setTouchMode(mode){
@@ -1788,12 +1797,18 @@ function initInput(){
     if(STATE.mode==='playing'){
       if(k==='1'){ fireHeld[1]=true; }
       if(k==='2'){ fireHeld[2]=true; }
-      if(k==='r'||k==='tab'){ e.preventDefault(); cycleTarget(); }
+      if(k==='r'||k==='tab'){ cycleTarget(); }
       if(k==='escape'){ pauseGame(); }
-      if(k==='w'||k==='a'||k==='s'||k==='d'||k===' ') e.preventDefault();
+      // toggle the diagnostic readout with the backquote key
+      if(k==='`'){ window._gpDebugForce=!window._gpDebugForce; }
+      // When a controller is active, iOS may also expose it as a keyboard.
+      // Swallow every key during play so it can't scroll, switch, or pop the
+      // soft keyboard — gamepad input is read separately via polling.
+      if(gpConnected){ e.preventDefault(); }
+      else if(k==='w'||k==='a'||k==='s'||k==='d'||k===' ') e.preventDefault();
     }
   });
-  addEventListener('keyup', e=>{ const k=e.key.toLowerCase(); keys[k]=false; if(k==='1')fireHeld[1]=false; if(k==='2')fireHeld[2]=false; });
+  addEventListener('keyup', e=>{ const k=e.key.toLowerCase(); keys[k]=false; if(k==='1')fireHeld[1]=false; if(k==='2')fireHeld[2]=false; if(gpConnected && STATE.mode==='playing') e.preventDefault(); });
 
   // mouse look (pointer lock)
   const cv=$('#scene');
@@ -1805,6 +1820,12 @@ function initInput(){
   addEventListener('contextmenu', e=>{ if(STATE.mode==='playing') e.preventDefault(); });
 
   initTouch();   // listeners are harmless when the touch panel is hidden
+
+  // gamepad connect/disconnect (polling does the real work; these refresh UI)
+  addEventListener('gamepadconnected', ()=>{ gpConnected=true; refreshTouchUI(); });
+  addEventListener('gamepaddisconnected', ()=>{ if(!getActivePad()){ gpConnected=false; refreshTouchUI(); } });
+  // returning to the tab resets the frame clock so the freeze-recovery isn't a dt spike
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && clock){ clock.getDelta(); } });
 }
 
 function initTouch(){
@@ -1852,6 +1873,64 @@ function initTouch(){
   tap($('#pauseBtn'), pauseGame);
 }
 
+/* ============================================================
+   GAMEPAD — Switch Pro Controller等（iPadOS Bluetooth）
+   ============================================================ */
+const gpEdge={};
+function gpFresh(btn,key,i,fn){ const now=!!(btn[i]&&btn[i].pressed); if(now&&!gpEdge[key]) fn(); gpEdge[key]=now; }
+function getActivePad(){
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for(const p of pads){ if(p && p.connected && p.axes && p.axes.length>=2) return p; }
+  return null;
+}
+function pollGamepad(dt){
+  const gp=getActivePad();
+  const now=performance.now();
+  if(!gp){
+    if(gpConnected && now-gpLastSeen>1500){ gpConnected=false; refreshTouchUI(); }
+    return;
+  }
+  gpLastSeen=now; gpStamp=gp.timestamp;
+  if(!gpConnected){ gpConnected=true; refreshTouchUI(); Audio.resume(); }
+  const ax=gp.axes, btn=gp.buttons||[];
+  const dz=v=>Math.abs(v)<0.18?0:v;
+  let mx=dz(ax[0]||0), my=dz(ax[1]||0);
+  const rx=dz(ax[2]||0), ry=dz(ax[3]||0);
+  const pressed=i=> !!(btn[i] && btn[i].pressed);
+  if(pressed(12)) my=-1; if(pressed(13)) my=1; if(pressed(14)) mx=-1; if(pressed(15)) mx=1;
+  if(STATE.mode==='playing'){
+    moveVec.x=mx; moveVec.y=my;
+    const rate=((SAVE.settings.sens||110)/110)*2.6;
+    player.yaw   -= rx*rate*dt;
+    player.pitch  = clamp(player.pitch - ry*rate*dt, -0.6, 0.5);
+    fireHeld[1] = pressed(7)||pressed(5);
+    fireHeld[2] = pressed(6)||pressed(4);
+    keys['jet'] = pressed(0)||pressed(1);
+    gpFresh(btn,'cycleY',3,cycleTarget);
+    gpFresh(btn,'cycleX',2,cycleTarget);
+    gpFresh(btn,'stickR',11,cycleTarget);
+    gpFresh(btn,'pause',9,pauseGame);
+    gpFresh(btn,'pause2',8,pauseGame);
+  } else {
+    gpFresh(btn,'mResume',1,()=>{ if(STATE.mode==='paused') resumeGame(); });
+    gpFresh(btn,'mPlus',9,()=>{ if(STATE.mode==='paused') resumeGame(); });
+  }
+}
+function refreshTouchUI(){
+  $('#touch').classList.toggle('on', STATE.mode==='playing' && isTouch && !gpConnected);
+  $('#hud').classList.toggle('touchui', isTouch && !gpConnected);
+  if(gpConnected) toast('コントローラー接続');
+}
+// live diagnostic readout — tells us, when a freeze happens, WHAT froze
+function updateGpDebug(){
+  const el=$('#gpDbg'); if(!el) return;
+  if(!gpConnected && !window._gpDebugForce){ el.style.display='none'; return; }
+  const gp=getActivePad();
+  el.style.display='block';
+  const stale = gp ? Math.round(performance.now()-gpLastSeen) : '-';
+  el.textContent='F:'+frameCount+'  PAD:'+(gp?'y':'n')+'  ts:'+(gp?Math.round(gp.timestamp):'-')+'  age:'+stale+'ms';
+}
+
 /* ---------- pause ---------- */
 function pauseGame(){
   if(STATE.mode!=='playing') return;
@@ -1862,7 +1941,7 @@ function pauseGame(){
   refreshModeButtons();
   showScreen('scrPause');
 }
-function resumeGame(){ hideAllScreens(); STATE.mode='playing'; $('#hud').classList.add('on'); if(isTouch)$('#touch').classList.add('on'); if(!isTouch)$('#scene').requestPointerLock(); }
+function resumeGame(){ hideAllScreens(); STATE.mode='playing'; $('#hud').classList.add('on'); if(isTouch&&!gpConnected)$('#touch').classList.add('on'); if(!isTouch&&!gpConnected)$('#scene').requestPointerLock(); }
 
 /* ============================================================
    WIRE UP UI
@@ -1995,8 +2074,18 @@ function renderKeys(){
     ['Esc','一時停止 / 設定'],
   ];
   const tm = isTouch? [['左スティック','移動'],['右側ドラッグ','視点・照準'],['射撃 1 / 射撃 2','武器グループ（長押し）'],['JET','ジャンプジェット（長押し）'],['目標 ▸','目標切替'],['❚❚','一時停止 / メニュー']] : rows;
+  const gpRows=[
+    ['左スティック / 十字','移動 / 横移動'],
+    ['右スティック','視点・照準'],
+    ['ZR / R','トリガーグループ1で射撃'],
+    ['ZL / L','トリガーグループ2で射撃'],
+    ['A / B','ジャンプジェット'],
+    ['X / Y','目標切替'],
+    ['＋ / －','一時停止 / メニュー'],
+  ];
+  const list = gpConnected ? gpRows : (isTouch?tm:rows);
   const el=$('#keyList'); el.innerHTML='';
-  (isTouch?tm:rows).forEach(([k,v])=>{ const a=document.createElement('span'); a.innerHTML='<span class="kbd">'+k+'</span>'; const b=document.createElement('span'); b.textContent=v; el.appendChild(a); el.appendChild(b); });
+  list.forEach(([k,v])=>{ const a=document.createElement('span'); a.innerHTML='<span class="kbd">'+k+'</span>'; const b=document.createElement('span'); b.textContent=v; el.appendChild(a); el.appendChild(b); });
 }
 
 /* ============================================================
