@@ -1547,6 +1547,7 @@ function ticker(t){ $('#ticker').textContent=t; }
 function loop(){
   requestAnimationFrame(loop);
   const dt=Math.min(clock.getDelta(),0.05);
+  try{ pollGamepad(dt); }catch(e){ /* no gamepad / API absent */ }
   try{ update(dt); }catch(e){ console.warn('update',e); }
   try{ renderer.render(scene,camera); }catch(e){ console.warn('render',e); }
 }
@@ -1557,8 +1558,8 @@ function loop(){
 function setMode(m){
   STATE.mode=m;
   $('#hud').classList.toggle('on', m==='playing');
-  $('#hud').classList.toggle('touchui', isTouch);   // touch: move panels clear of thumb buttons
-  $('#touch').classList.toggle('on', m==='playing' && isTouch);
+  $('#hud').classList.toggle('touchui', isTouch && !gpConnected);   // touch: move panels clear of thumb buttons
+  $('#touch').classList.toggle('on', m==='playing' && isTouch && !gpConnected);
   if(m==='playing'){ hideAllScreens(); }
 }
 function hideAllScreens(){ $$('.screen').forEach(s=>s.classList.remove('on')); }
@@ -1766,6 +1767,7 @@ function computeTouch(){
 }
 let isTouch = computeTouch();
 let pointerLocked=false;
+let gpConnected=false;          // a gamepad (Switch Pro等) is present
 const fireHeld={1:false,2:false};   // hold-to-fire for both touch and mouse
 
 function setTouchMode(mode){
@@ -1805,6 +1807,10 @@ function initInput(){
   addEventListener('contextmenu', e=>{ if(STATE.mode==='playing') e.preventDefault(); });
 
   initTouch();   // listeners are harmless when the touch panel is hidden
+
+  // gamepad connect/disconnect (polling does the real work; these just refresh UI)
+  addEventListener('gamepadconnected', ()=>{ gpConnected=true; refreshTouchUI(); });
+  addEventListener('gamepaddisconnected', ()=>{ if(!getActivePad()){ gpConnected=false; refreshTouchUI(); } });
 }
 
 function initTouch(){
@@ -1852,6 +1858,55 @@ function initTouch(){
   tap($('#pauseBtn'), pauseGame);
 }
 
+/* ============================================================
+   GAMEPAD — Switch Pro Controller等（iPadOS Bluetooth, 標準マッピング）
+   毎フレーム getGamepads() をポーリング。Safariはイベントが遅延するため。
+   ============================================================ */
+const gpEdge={};
+function gpFresh(btn,key,i,fn){ const now=!!(btn[i]&&btn[i].pressed); if(now&&!gpEdge[key]) fn(); gpEdge[key]=now; }
+function getActivePad(){
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for(const p of pads){ if(p && p.connected && p.axes && p.axes.length>=2) return p; }
+  return null;
+}
+function pollGamepad(dt){
+  const gp=getActivePad();
+  if(!gp){ if(gpConnected){ gpConnected=false; refreshTouchUI(); } return; }
+  if(!gpConnected){ gpConnected=true; refreshTouchUI(); Audio.resume(); }
+  const ax=gp.axes, btn=gp.buttons||[];
+  const dz=v=>Math.abs(v)<0.18?0:v;
+  const lx=dz(ax[0]||0), ly=dz(ax[1]||0);
+  const rx=dz(ax[2]||0), ry=dz(ax[3]||0);
+  const pressed=i=> !!(btn[i] && btn[i].pressed);
+  if(STATE.mode==='playing'){
+    // left stick: move (forward = stick up). matches touch moveVec convention.
+    moveVec.x=lx; moveVec.y=ly;
+    // right stick: aim. framerate-independent; respects the sensitivity slider.
+    const rate=((SAVE.settings.sens||110)/110)*2.6;
+    player.yaw   -= rx*rate*dt;
+    player.pitch  = clamp(player.pitch - ry*rate*dt, -0.6, 0.5);
+    // ZR/R -> weapon group 1, ZL/L -> group 2, B/A -> jump jet
+    fireHeld[1] = pressed(7)||pressed(5);
+    fireHeld[2] = pressed(6)||pressed(4);
+    keys['jet'] = pressed(0)||pressed(1);
+    gpFresh(btn,'cycleY',3,cycleTarget);   // Y
+    gpFresh(btn,'cycleX',2,cycleTarget);   // X
+    gpFresh(btn,'stickR',11,cycleTarget);  // right-stick click
+    gpFresh(btn,'pause',9,pauseGame);      // + / Start
+    gpFresh(btn,'pause2',8,pauseGame);     // - / Select
+  } else {
+    // menus / pause: A or + confirms-resume
+    gpFresh(btn,'mResume',1,()=>{ if(STATE.mode==='paused') resumeGame(); });
+    gpFresh(btn,'mPlus',9,()=>{ if(STATE.mode==='paused') resumeGame(); });
+  }
+}
+// when a real controller is in use on a touch device, hide the on-screen pad
+function refreshTouchUI(){
+  const showTouch = STATE.mode==='playing' && isTouch && !gpConnected;
+  $('#touch').classList.toggle('on', showTouch);
+  if(gpConnected) toast('コントローラー接続');
+}
+
 /* ---------- pause ---------- */
 function pauseGame(){
   if(STATE.mode!=='playing') return;
@@ -1862,7 +1917,7 @@ function pauseGame(){
   refreshModeButtons();
   showScreen('scrPause');
 }
-function resumeGame(){ hideAllScreens(); STATE.mode='playing'; $('#hud').classList.add('on'); if(isTouch)$('#touch').classList.add('on'); if(!isTouch)$('#scene').requestPointerLock(); }
+function resumeGame(){ hideAllScreens(); STATE.mode='playing'; $('#hud').classList.add('on'); if(isTouch&&!gpConnected)$('#touch').classList.add('on'); if(!isTouch&&!gpConnected)$('#scene').requestPointerLock(); }
 
 /* ============================================================
    WIRE UP UI
@@ -1995,8 +2050,18 @@ function renderKeys(){
     ['Esc','一時停止 / 設定'],
   ];
   const tm = isTouch? [['左スティック','移動'],['右側ドラッグ','視点・照準'],['射撃 1 / 射撃 2','武器グループ（長押し）'],['JET','ジャンプジェット（長押し）'],['目標 ▸','目標切替'],['❚❚','一時停止 / メニュー']] : rows;
+  const gpRows=[
+    ['左スティック','移動 / 横移動'],
+    ['右スティック','視点・照準'],
+    ['ZR / R','トリガーグループ1で射撃'],
+    ['ZL / L','トリガーグループ2で射撃'],
+    ['A / B','ジャンプジェット'],
+    ['X / Y','目標切替'],
+    ['＋ / －','一時停止 / メニュー'],
+  ];
+  const list = gpConnected ? gpRows : (isTouch?tm:rows);
   const el=$('#keyList'); el.innerHTML='';
-  (isTouch?tm:rows).forEach(([k,v])=>{ const a=document.createElement('span'); a.innerHTML='<span class="kbd">'+k+'</span>'; const b=document.createElement('span'); b.textContent=v; el.appendChild(a); el.appendChild(b); });
+  list.forEach(([k,v])=>{ const a=document.createElement('span'); a.innerHTML='<span class="kbd">'+k+'</span>'; const b=document.createElement('span'); b.textContent=v; el.appendChild(a); el.appendChild(b); });
 }
 
 /* ============================================================
