@@ -529,27 +529,31 @@ const CHASSIS = {
 };
 
 /* ---------- DATA: enemy templates ---------- */
-// move: movement personality — controls strafing weight, juke & jump cadence.
-//   skirmish = weave + circle, jumps often   strafer = circle-strafe at range
-//   jumpjet  = airborne harasser, jets constantly   bruiser = slow advance, rare leap
-// jump: jump-jet thrust (0 = grounded). jumpCd/strafeCd = [min,max] seconds between events.
+// move: movement personality — controls how much it circles vs. charges, and jump cadence.
+//   plodder  = slow straight advance, no jets (easy)   strafer = circle-strafe at range
+//   skirmish = light hopper, weaves + small dodge-jumps  jumpjet = airborne jet harasser (hard)
+//   bruiser  = slow heavy, grinds forward, no jets
+// shape: which silhouette buildMech() renders.  jump: jet thrust (0 = grounded).
+// jumpCd / strafeCd = [min,max] seconds between jumps / direction flips.
 const FOES = {
-  scout: {name:'ローカスト',   structure:70,  speed:40, dmg:6,  fireCd:0.9, range:280, color:0x7fd0ff, scale:0.78, reward:9000,
-          move:'skirmish', jump:1.15, jumpCd:[2.4,4.2], strafeCd:[0.7,1.5]},
-  wasp:  {name:'ワスプ',      structure:95,  speed:44, dmg:8,  fireCd:1.0, range:300, color:0x9affd0, scale:0.72, reward:13000,
-          move:'jumpjet',  jump:1.7,  jumpCd:[1.0,2.2], strafeCd:[0.6,1.1]},
-  med:   {name:'ハンチバック',structure:150, speed:26, dmg:14, fireCd:1.3, range:340, color:0xff8a4a, scale:1.0,  reward:18000,
-          move:'strafer',  jump:0.7,  jumpCd:[4.5,8],   strafeCd:[1.4,3]},
-  heavy: {name:'ウォーハンマー',structure:260, speed:18, dmg:24, fireCd:1.7, range:430, color:0xff5a5a, scale:1.22, reward:34000,
-          move:'bruiser',  jump:0.5,  jumpCd:[7,13],    strafeCd:[2.5,4.5]},
+  grunt: {name:'ジャベリン',  structure:90,  speed:20, dmg:9,  fireCd:1.2, range:300, color:0x8aa0b8, scale:0.95, reward:8000,
+          shape:'grunt',     move:'plodder',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5]},
+  scout: {name:'ローカスト',   structure:75,  speed:36, dmg:6,  fireCd:0.95,range:280, color:0x7fd0ff, scale:0.80, reward:10000,
+          shape:'locust',    move:'skirmish', jump:0.9, jumpCd:[4,7],    strafeCd:[1.2,2.4]},
+  wasp:  {name:'ワスプ',      structure:100, speed:40, dmg:8,  fireCd:1.0, range:300, color:0x9affd0, scale:0.78, reward:14000,
+          shape:'wasp',      move:'jumpjet',  jump:1.6, jumpCd:[2.5,4.5],strafeCd:[0.9,1.6]},
+  med:   {name:'ハンチバック',structure:160, speed:24, dmg:14, fireCd:1.3, range:340, color:0xff8a4a, scale:1.0,  reward:18000,
+          shape:'hunchback', move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[1.8,3.2]},
+  heavy: {name:'ウォーハンマー',structure:270, speed:16, dmg:24, fireCd:1.7, range:430, color:0xff5a5a, scale:1.25, reward:34000,
+          shape:'warhammer', move:'bruiser',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5]},
 };
 
 /* ---------- DATA: missions ---------- */
 const MISSIONS = [
-  {id:0, name:'前哨小競り合い',  diff:'★☆☆☆', reward:55000,  waves:[['scout','scout'],['scout','wasp']]},
-  {id:1, name:'国境襲撃',      diff:'★★☆☆', reward:90000,  waves:[['scout','med'],['wasp','med'],['med','scout','wasp']]},
-  {id:2, name:'補給線遮断',    diff:'★★★☆', reward:150000, waves:[['med','wasp'],['heavy','scout'],['med','med','wasp']]},
-  {id:3, name:'威力偵察',   diff:'★★★☆', reward:210000, waves:[['med','wasp','scout'],['heavy','med'],['heavy','wasp','wasp']]},
+  {id:0, name:'前哨小競り合い',  diff:'★☆☆☆', reward:55000,  waves:[['grunt','grunt'],['grunt','scout']]},
+  {id:1, name:'国境襲撃',      diff:'★★☆☆', reward:90000,  waves:[['grunt','scout'],['scout','med'],['med','grunt','scout']]},
+  {id:2, name:'補給線遮断',    diff:'★★★☆', reward:150000, waves:[['med','scout'],['heavy','grunt'],['med','med','scout']]},
+  {id:3, name:'威力偵察',   diff:'★★★☆', reward:210000, waves:[['med','scout','wasp'],['heavy','med'],['heavy','wasp']]},
   {id:4, name:'指揮系統破壊',     diff:'★★★★', reward:340000, waves:[['heavy','med','med'],['heavy','wasp','wasp'],['heavy','heavy','med','wasp']]},
 ];
 
@@ -865,27 +869,60 @@ function buildArena(){
 /* ---------- mech model builder ----------
    torso and legs are separate groups so the torso can twist toward its
    target while the legs face the direction of travel (本家トルソツイスト) */
-function buildMech(color, scale){
+// Render a mech with a per-type silhouette so each foe is recognizable on sight.
+function buildMech(def){
+  const color = (def&&def.color)||0xcccccc;
+  const scale = (def&&def.scale)||1;
+  const shape = (def&&def.shape)||'grunt';
   const g = new THREE.Group();
   const torsoG = new THREE.Group(), legsG = new THREE.Group();
   g.add(torsoG); g.add(legsG);
-  const mat = new THREE.MeshStandardMaterial({color, roughness:.5, metalness:.45, map:TEX.hull||null});
+  const mat  = new THREE.MeshStandardMaterial({color, roughness:.5, metalness:.45, map:TEX.hull||null});
   const dark = new THREE.MeshStandardMaterial({color:0x111813, roughness:.7, metalness:.3, map:TEX.hull||null});
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(16,14,11), mat); torso.position.y=20; torsoG.add(torso);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(7,6,7), dark); head.position.set(0,29,2); torsoG.add(head);
-  const eye = new THREE.Mesh(new THREE.BoxGeometry(5,1.6,0.6), new THREE.MeshStandardMaterial({color:0x9af, emissive:0x3aa0ff, emissiveIntensity:1.4}));
-  eye.position.set(0,29.6,5.6); torsoG.add(eye);
-  // arms / weapon pods
-  for(const s of [-1,1]){
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(5,12,5), mat); arm.position.set(s*12,20,0); torsoG.add(arm);
-    const pod = new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.4,9,8), dark); pod.rotation.x=Math.PI/2; pod.position.set(s*12,21,6); torsoG.add(pod);
+  const jetMat = new THREE.MeshStandardMaterial({color:0x37d6ff, emissive:0x1e7090, emissiveIntensity:.6, roughness:.4, metalness:.5});
+  // helpers: box / cylinder; default parent = torso
+  const B=(w,h,d,m,x,y,z,p)=>{ const me=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m); me.position.set(x,y,z); (p||torsoG).add(me); return me; };
+  const C=(rt,rb,h,m,x,y,z,p,rx)=>{ const me=new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,8),m); me.position.set(x,y,z); if(rx)me.rotation.x=rx; (p||torsoG).add(me); return me; };
+  const EYE=(y,z,w)=>B(w||5,1.6,0.6,new THREE.MeshStandardMaterial({color:0x9af,emissive:0x3aa0ff,emissiveIntensity:1.4}),0,y,z);
+
+  if(shape==='locust'){
+    // light bird-legged scout: slim body, forward sensor head, reverse-joint legs
+    B(12,9,9,mat,0,17,0);
+    B(6,5,7,dark,0,23,2); EYE(23.4,5.7,4);
+    for(const s of [-1,1]) C(2,2,7,dark,s*8,18,5,torsoG,Math.PI/2);
+    for(const s of [-1,1]){
+      const thigh=B(4,9,4,mat,s*5,12,-1,legsG); thigh.rotation.x=0.5;
+      const shin =B(3.5,9,3.5,dark,s*5,5,2,legsG); shin.rotation.x=-0.6;
+      B(8,2.5,7,dark,s*5,0.8,5,legsG);
+    }
+  } else if(shape==='wasp'){
+    // jump-jet flyer: compact body with twin thruster cones on the back
+    B(12,12,9,mat,0,19,0);
+    B(6,5,6,dark,0,26,2); EYE(26.4,5.4,4);
+    for(const s of [-1,1]) C(2,2,8,dark,s*9,20,5,torsoG,Math.PI/2);
+    for(const s of [-1,1]) C(3.4,1.2,8,jetMat,s*6,18,-7,torsoG,0.35);   // jet nozzles
+    for(const s of [-1,1]){ B(4,11,4,mat,s*5,9,0,legsG); B(7,2.5,9,dark,s*5,1.3,1,legsG); }
+  } else if(shape==='hunchback'){
+    // mid mech with the iconic asymmetric shoulder cannon hump + offset cockpit
+    B(18,15,12,mat,0,20,0);
+    B(12,12,12,dark,9,27,0); C(3,3,10,dark,9,27,8,torsoG,Math.PI/2);
+    B(6,6,7,dark,-4,29,2); EYE(29.5,5.7,4.5);
+    B(5,12,5,mat,-12,20,0); C(2.4,2.4,9,dark,-12,21,6,torsoG,Math.PI/2);
+    for(const s of [-1,1]){ B(6.5,12,6.5,mat,s*5,9,0,legsG); B(9,3,12,dark,s*5,1.6,1,legsG); }
+  } else if(shape==='warhammer'){
+    // heavy assault: broad torso, twin arm-mounted PPC barrels, thick legs
+    B(22,16,13,mat,0,22,0);
+    B(8,7,8,dark,0,32,2); EYE(32.6,6.2,6);
+    for(const s of [-1,1]){ B(7,13,7,mat,s*14,22,0); C(3,3.4,13,dark,s*14,22,9,torsoG,Math.PI/2); }
+    for(const s of [-1,1]){ B(8,14,8,mat,s*6,11,0,legsG); B(11,4,15,dark,s*6,2,1,legsG); }
+  } else {
+    // grunt — stocky generic humanoid
+    B(17,15,12,mat,0,20,0);
+    B(7,6,7,dark,0,29,2); EYE(29.6,5.6,5);
+    for(const s of [-1,1]){ B(5,13,5,mat,s*12,20,0); C(2.4,2.4,9,dark,s*12,21,6,torsoG,Math.PI/2); }
+    for(const s of [-1,1]){ B(6,12,6,mat,s*5,9,0,legsG); B(8,3,12,dark,s*5,1.6,1,legsG); }
   }
-  // legs
-  for(const s of [-1,1]){
-    const hip = new THREE.Mesh(new THREE.BoxGeometry(6,11,6), mat); hip.position.set(s*5,9,0); legsG.add(hip);
-    const foot = new THREE.Mesh(new THREE.BoxGeometry(8,3,12), dark); foot.position.set(s*5,1.6,1); legsG.add(foot);
-  }
-  g.scale.setScalar(scale||1);
+  g.scale.setScalar(scale);
   g.userData.torsoG=torsoG; g.userData.legsG=legsG;
   return g;
 }
@@ -973,7 +1010,7 @@ function spawnWave(){
     const f=FOES[type];
     const ang = (i/list.length)*Math.PI*2 + Math.random();
     const dist = 380+Math.random()*180;
-    const grp = buildMech(f.color, f.scale);
+    const grp = buildMech(f);
     const pos = new THREE.Vector3(Math.cos(ang)*dist, 0, Math.sin(ang)*dist);
     grp.position.copy(pos);
     scene.add(grp);
@@ -1333,44 +1370,41 @@ function update(dt){
     const band = f.range*0.7;
     let mv = new THREE.Vector3();
     // how much each archetype likes to circle vs. charge
-    const weave = move==='jumpjet'?0.9 : move==='skirmish'?0.65 : move==='strafer'?0.45 : 0.2;
+    const weave = move==='jumpjet'?0.75 : move==='skirmish'?0.5 : move==='strafer'?0.45 : move==='bruiser'?0.18 : 0.12;
     if(distP > band*1.15){
       mv.copy(toP).addScaledVector(perp, weave);          // close in, weaving
     } else if(distP < band*0.55){
-      mv.copy(toP).multiplyScalar(-1).addScaledVector(perp, 0.7); // too close — back off + circle
+      mv.copy(toP).multiplyScalar(-1).addScaledVector(perp, weave*0.9); // too close — back off
     } else {
-      mv.copy(perp).addScaledVector(toP, distP>band?0.25:-0.25);  // hold band, circle-strafe
+      mv.copy(perp).multiplyScalar(weave).addScaledVector(toP, distP>band?0.2:-0.2); // hold band
     }
     mv.y=0; if(mv.lengthSq()>1e-4) mv.normalize();
 
-    // ---- jump jets: launch into the air on a timer ----
+    // ---- jump jets: only jet-capable foes leap, on a timer ----
     e.jumpCd -= dt;
     const grounded = e.pos.y<=0.05;
     if((f.jump||0)>0 && grounded && e.jumpCd<=0 && distP < f.range*1.4){
-      e.vy = 30*f.jump; e.jumping=true; e.jumpCd = rndR(f.jumpCd||[5,9]);
+      e.vy = 46*f.jump; e.jumping=true; e.jumpCd = rndR(f.jumpCd||[5,9]);
     }
-    // vertical integration (gravity / landing)
+    // vertical integration (floaty jet-style gravity / landing)
     if(!grounded || e.vy>0){
-      e.vy -= 78*dt; e.pos.y += e.vy*dt;
+      e.vy -= 70*dt; e.pos.y += e.vy*dt;
       if(e.pos.y<=0){ e.pos.y=0; e.vy=0; e.jumping=false; }
     }
     const airborne = e.pos.y>2;
     // jet exhaust puffs under the feet while thrusting up
     if(e.vy>1){ e.jetT-=dt; if(e.jetT<=0){ e.jetT=0.05;
       const fp=e.pos.clone(); fp.y+=2; fxPuff(fp, 0xffd0a0, 2.4*(f.scale||1), 0.3); } }
-    // airborne mechs glide faster (jets) and can clear buildings
-    const speedMul = airborne ? 1.45 : 1;
+    const speedMul = airborne ? 1.3 : 1;
 
-    // ---- horizontal move with wall-sliding (skipped while flying over buildings) ----
+    // ---- horizontal move with wall-sliding; high jumps clear short buildings ----
     const prevX=e.pos.x, prevZ=e.pos.z;
     const step = mv.multiplyScalar(f.speed*speedMul*dt);
     const nx = clamp(e.pos.x+step.x,-ARENA,ARENA);
     const nz = clamp(e.pos.z+step.z,-ARENA,ARENA);
-    const blocker = (x,z)=>{ for(const o of obstacles){ if(Math.abs(x-o.x)<o.hw && Math.abs(z-o.z)<o.hd) return o; } return null; };
-    const cur = airborne ? null : blocker(e.pos.x, e.pos.z);
-    if(airborne){
-      e.pos.x=nx; e.pos.z=nz;                 // flying — ignore footprints
-    } else if(cur){
+    const blocker = (x,z)=>{ for(const o of obstacles){ if(Math.abs(x-o.x)<o.hw && Math.abs(z-o.z)<o.hd && e.pos.y<(o.mesh.geometry.parameters.height||80)) return o; } return null; };
+    const cur = blocker(e.pos.x, e.pos.z);
+    if(cur){
       // embedded in a building footprint — shove out along the shallowest axis so it can escape
       const dx = e.pos.x-cur.x, dz = e.pos.z-cur.z;
       const penX = cur.hw-Math.abs(dx), penZ = cur.hd-Math.abs(dz);
