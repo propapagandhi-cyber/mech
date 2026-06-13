@@ -519,6 +519,9 @@ const WEAPONS = {
   ac20:  {id:'ac20',  name:'オートキャノン/20', type:'ballistic', dmg:48, heat:7,  cd:2.4,  range:260, ton:10, cost:320000, ammo:30, proj:230, color:0xffae3a},
   srm:   {id:'srm',   name:'SRM‑6（短距離ミサイル）',         type:'missile',   dmg:7,  heat:4,  cd:1.3,  range:300, ton:3,  cost:72000,  ammo:120,proj:150, color:0xb8a8ff, count:6, splash:6},
   lrm:   {id:'lrm',   name:'LRM‑10（長距離ミサイル）',        type:'missile',   dmg:5,  heat:5,  cd:1.7,  range:620, ton:5,  cost:120000, ammo:120,proj:130, color:0x9a8cff, count:10, splash:5, homing:true},
+  lrm15: {id:'lrm15', name:'LRM‑15（長距離ミサイル）',        type:'missile',   dmg:5,  heat:7,  cd:2.0,  range:640, ton:7,  cost:178000, ammo:90, proj:135, color:0x8a7cff, count:15, splash:5, homing:true},
+  gauss: {id:'gauss', name:'ガウスライフル',          type:'ballistic', dmg:42, heat:2,  cd:2.3,  range:680, ton:8,  cost:255000, ammo:40, proj:460, color:0xd6f2ff, splash:6},
+  hvy:   {id:'hvy',   name:'重迫撃砲（施設破砕）',      type:'ballistic', dmg:36, heat:6,  cd:2.0,  range:420, ton:7,  cost:185000, ammo:40, proj:240, color:0xff8a3a, splash:18},
 };
 
 /* ---------- DATA: chassis ---------- */
@@ -546,6 +549,22 @@ const FOES = {
           shape:'hunchback', move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[1.8,3.2]},
   heavy: {name:'ウォーハンマー',structure:270, speed:16, dmg:24, fireCd:1.7, range:430, color:0xff5a5a, scale:1.25, reward:34000,
           shape:'warhammer', move:'bruiser',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5]},
+  // ---- vehicles (敵車両) — low silhouette, no jump jets ----
+  tank:  {name:'デモリッシャー戦車',structure:150, speed:22, dmg:20, fireCd:1.6, range:400, color:0x6b7a4a, scale:1.0, reward:13000,
+          shape:'tank',      move:'bruiser',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5],   kind:'vehicle'},
+  hover: {name:'ホバータンク',  structure:90,  speed:48, dmg:9,  fireCd:0.85,range:300, color:0x4ab0c8, scale:0.95, reward:11000,
+          shape:'hover',     move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[1.0,2.0],kind:'vehicle'},
+};
+
+/* ---------- DATA: destructible facilities (施設) ----------
+   Static objective structures. fires:true makes a defensive turret shoot back;
+   chain:true detonates nearby actors (fuel). hitR/aimY/height drive hit tests. */
+const STRUCTS = {
+  antenna: {name:'通信アンテナ', hp:90,  hitR:16, aimY:26, height:52, color:0xbfc6cf},
+  radar:   {name:'レーダー基地', hp:140, hitR:20, aimY:16, height:34, color:0xc9d2dd},
+  fuel:    {name:'燃料デポ',     hp:80,  hitR:22, aimY:12, height:26, color:0xd0a23a, chain:true},
+  turret:  {name:'防衛タレット', hp:70,  hitR:12, aimY:9,  height:18, color:0x8a6a4a, fires:true, dmg:13, fireCd:1.5, range:380},
+  hq:      {name:'敵戦区司令部', hp:260, hitR:30, aimY:16, height:34, color:0x9aa3ad},
 };
 
 /* ---------- DATA: missions ---------- */
@@ -555,6 +574,28 @@ const MISSIONS = [
   {id:2, name:'補給線遮断',    diff:'★★★☆', reward:150000, waves:[['med','scout'],['heavy','grunt'],['med','med','scout']]},
   {id:3, name:'威力偵察',   diff:'★★★☆', reward:210000, waves:[['med','scout','wasp'],['heavy','med'],['heavy','wasp']]},
   {id:4, name:'指揮系統破壊',     diff:'★★★★', reward:340000, waves:[['heavy','med','med'],['heavy','wasp','wasp'],['heavy','heavy','med','wasp']]},
+  // ---- 目標達成型ミッション（施設破壊・待ち伏せ・車両） ----
+  {id:5, name:'通信封鎖作戦', diff:'★★★★', reward:430000,
+   briefing:'敵の通信網がこの戦区の防空を支えている。前線哨戒を抜き、通信アンテナとレーダー基地を破壊して敵の目を潰せ。設備を破壊すれば守備隊が反撃に出るだろう。撤退路では待ち伏せが予想される。',
+   stages:[
+     {msg:'前線哨戒を排除',         foes:['grunt','scout','tank']},
+     {msg:'通信網を破壊せよ',       structures:['antenna','antenna','radar'], foes:['grunt','med'], reinforce:['wasp','scout']},
+     {msg:'撤退路 — 待ち伏せ！',     ambush:true, foes:['med','hover','hover']},
+   ]},
+  {id:6, name:'補給基地強襲', diff:'★★★★☆', reward:540000,
+   briefing:'前線を支える敵の補給基地を強襲する。燃料デポと通信アンテナを破壊して補給を断て。基地は防衛タレットに守られている。燃料デポは大爆発を起こすため、周囲の敵を巻き込める。設備が落ちれば守備隊主力が出撃してくる。',
+   stages:[
+     {msg:'外周警備を制圧',         foes:['tank','tank','scout']},
+     {msg:'補給設備を破壊せよ',     structures:['fuel','fuel','turret','antenna'], foes:['grunt','med'], reinforce:['heavy','wasp']},
+     {msg:'守備隊主力を撃破',       foes:['heavy','med','tank']},
+   ]},
+  {id:7, name:'敵司令部殲滅', diff:'★★★★★', reward:720000,
+   briefing:'敵戦区司令部への直接攻撃。降着直後から交戦は必至。レーダーと防衛タレットの防衛網を突破し、最深部の司令部を破壊して作戦を完遂せよ。司令部を攻撃すれば最後の親衛隊が立ちはだかる。',
+   stages:[
+     {msg:'降着地点で交戦 — 待ち伏せ！', ambush:true, foes:['med','hover','hover']},
+     {msg:'防衛網を突破',           structures:['radar','turret','turret','antenna'], foes:['heavy','med']},
+     {msg:'司令部を破壊せよ',       structures:['hq'], foes:['heavy','heavy','wasp'], reinforce:['med','tank']},
+   ]},
 ];
 
 /* ---------- SAVE ---------- */
@@ -658,6 +699,11 @@ function sanitizeSave(s){
   // stats
   const st = (s.stats&&typeof s.stats==='object')?s.stats:{};
   out.stats = {kills:num(st.kills,0), missions:num(st.missions,0), deaths:num(st.deaths,0), damage:num(st.damage,0)};
+  // continuation unlock: veterans who reached the old final contract (id 4)
+  // get the new objective-based missions opened up immediately
+  if(out.unlockedMission>=4 && out.stats.missions>=4 && MISSIONS.length>5){
+    out.unlockedMission = Math.max(out.unlockedMission, 5);
+  }
   // settings
   const se = (s.settings&&typeof s.settings==='object')?s.settings:{};
   out.settings = {sens:clamp(num(se.sens,110),20,240), sound: se.sound!==false,
@@ -915,6 +961,23 @@ function buildMech(def){
     B(8,7,8,dark,0,32,2); EYE(32.6,6.2,6);
     for(const s of [-1,1]){ B(7,13,7,mat,s*14,22,0); C(3,3.4,13,dark,s*14,22,9,torsoG,Math.PI/2); }
     for(const s of [-1,1]){ B(8,14,8,mat,s*6,11,0,legsG); B(11,4,15,dark,s*6,2,1,legsG); }
+  } else if(shape==='tank'){
+    // tracked assault vehicle: low wide hull on treads (legsG=hull, faces travel),
+    // a turret that twists toward the player (torsoG) with a long main gun
+    B(24,5,30,dark,0,4,0,legsG);                              // hull belly
+    for(const s of [-1,1]) B(6,7,34,dark,s*14,4.5,0,legsG);  // track pods
+    for(const s of [-1,1]) for(let z=-13;z<=13;z+=6.5) C(3.6,3.6,6,mat,s*14,4.5,z,legsG,Math.PI/2); // road wheels
+    B(22,7,22,mat,0,9,0,legsG);                               // upper hull
+    B(15,8,16,mat,0,15,0);                                    // turret (torso)
+    C(1.8,1.8,24,dark,0,15,15,torsoG,Math.PI/2);             // main gun
+    B(6,3,5,dark,0,19,-3); EYE(19.4,2.8,4);                   // commander sight
+  } else if(shape==='hover'){
+    // hovercraft: angular hull on a glowing air-cushion skirt, twin-barrel turret
+    B(20,3,30,jetMat,0,4,0,legsG);                            // glowing skirt
+    B(16,4,24,mat,0,9,0,legsG);                               // hull
+    B(11,5,11,mat,0,14,0);                                    // turret
+    for(const s of [-1,1]) C(1.3,1.3,13,dark,s*3.5,14,10,torsoG,Math.PI/2); // twin barrels
+    B(5,3,4,dark,0,17,-3); EYE(17.4,2.4,3.5);
   } else {
     // grunt — stocky generic humanoid
     B(17,15,12,mat,0,20,0);
@@ -924,6 +987,54 @@ function buildMech(def){
   }
   g.scale.setScalar(scale);
   g.userData.torsoG=torsoG; g.userData.legsG=legsG;
+  return g;
+}
+
+/* ---------- destructible facility builder ----------
+   Static objective structures. Each carries a blinking red beacon so it reads
+   as a target; radar dishes spin; turrets twist a gun toward the player. */
+function buildStructure(type){
+  const def=STRUCTS[type];
+  const g=new THREE.Group();
+  const steel=new THREE.MeshStandardMaterial({color:def.color, roughness:.6, metalness:.5, map:TEX.hull||null});
+  const dark =new THREE.MeshStandardMaterial({color:0x20262a, roughness:.85, metalness:.4});
+  const warn =new THREE.MeshStandardMaterial({color:0xff3a2f, emissive:0xff2a1f, emissiveIntensity:1.2});
+  const B=(w,h,d,m,x,y,z,p)=>{const me=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);me.position.set(x,y,z);(p||g).add(me);return me;};
+  const C=(rt,rb,h,m,x,y,z,rx)=>{const me=new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,12),m);me.position.set(x,y,z);if(rx)me.rotation.x=rx;g.add(me);return me;};
+  if(type==='antenna'){
+    B(18,3,18,dark,0,1.5,0);                          // concrete pad
+    C(2,3.4,46,steel,0,24,0);                         // lattice mast
+    for(let k=8;k<44;k+=9){ B(11,0.8,0.8,dark,0,k,0); B(0.8,0.8,11,dark,0,k,0); } // cross struts
+    const dish=C(0.6,7,3,steel,3,38,4); dish.rotation.set(1.0,0,0.4);             // small dish
+    g.userData.beacon=B(2.2,2.2,2.2,warn,0,48,0);
+  } else if(type==='radar'){
+    B(24,8,24,dark,0,4,0);                            // bunker base
+    C(3,4.5,12,steel,0,12,0);                         // pylon
+    const dishG=new THREE.Group(); dishG.position.set(0,20,0); g.add(dishG);
+    const dish=new THREE.Mesh(new THREE.CylinderGeometry(1,15,5,18,1,true),
+      new THREE.MeshStandardMaterial({color:def.color,side:THREE.DoubleSide,roughness:.5,metalness:.5}));
+    dish.rotation.z=Math.PI/2.4; dishG.add(dish);
+    g.userData.spin=dishG;
+    g.userData.beacon=B(1.8,1.8,1.8,warn,0,28,0);
+  } else if(type==='fuel'){
+    B(32,2,32,dark,0,1,0);                            // containment pad
+    for(const p of [[-8,-8],[8,-8],[0,9]]) C(6,6,22,steel,p[0],12,p[1]);
+    B(22,1.4,1.4,dark,0,9,0); B(1.4,1.4,22,dark,0,7,0);  // pipes
+    g.userData.beacon=B(1.8,1.8,1.8,warn,0,24,0);
+  } else if(type==='turret'){
+    B(15,5,15,dark,0,3,0);                            // armored base
+    const tur=new THREE.Group(); tur.position.set(0,8,0); g.add(tur);
+    tur.add(new THREE.Mesh(new THREE.BoxGeometry(11,7,11),steel));
+    const bar=new THREE.Mesh(new THREE.CylinderGeometry(1.3,1.3,14,10),dark); bar.rotation.x=Math.PI/2; bar.position.set(0,1,8); tur.add(bar);
+    const eye=new THREE.Mesh(new THREE.BoxGeometry(6,1.6,0.6),new THREE.MeshStandardMaterial({color:0xff9a6a,emissive:0xff5a2a,emissiveIntensity:1.3})); eye.position.set(0,2,5.4); tur.add(eye);
+    g.userData.turret=tur;
+  } else { // hq — fortified command bunker
+    B(46,18,30,steel,0,9,0);
+    B(50,4,34,dark,0,18,0);                           // roof slab
+    for(const s of [-1,1]) B(6,22,6,dark,s*20,11,12);  // corner pillars
+    C(2,2.8,24,steel,16,28,-9);                        // comms mast
+    g.userData.beacon=B(2.4,2.4,2.4,warn,16,40,-9);
+  }
   return g;
 }
 
@@ -944,10 +1055,12 @@ const player = {
   eye:9,
 };
 let enemies=[];        // {grp, def, pos, hp, maxhp, fireCd, vel, alive}
+let structures=[];     // {grp, def, type, pos, hp, maxhp, alive, isObjective, radius, aimY, height, fireCd}
 let projectiles=[];    // {mesh, vel, dmg, range, traveled, owner, splash, homing, target, color}
 let beams=[];          // transient hitscan beams {a,b,life,color}
 let laserSide=1;       // alternate left/right arm muzzle for beam visuals
-let mission=null, waveIdx=0, target=null, missionStartArmor=0, killsThisMission=0, dmgThisMission=0;
+let mission=null, stageIdx=0, target=null, missionStartArmor=0, killsThisMission=0, dmgThisMission=0;
+let structKills=0, stageReinforced=false, stageEnding=false;
 const keys={};
 let invuln=0;
 
@@ -983,58 +1096,115 @@ function buildPlayerFromSave(){
   });
 }
 
+// Normalize either schema into a list of stages.
+//   legacy:  waves:[[foe,...], ...]   →  [{foes:[...]}, ...]
+//   new:     stages:[{foes, structures, ambush, reinforce, msg}, ...]
+function missionStages(m){
+  if(m.stages) return m.stages;
+  return (m.waves||[]).map(w=>({foes:w}));
+}
+
 function startMission(mi){
-  mission=MISSIONS[mi]; waveIdx=0; killsThisMission=0; dmgThisMission=0;
+  mission=MISSIONS[mi]; mission._stages=missionStages(mission);
+  stageIdx=0; killsThisMission=0; dmgThisMission=0; structKills=0; stageEnding=false;
   buildPlayerFromSave();
   missionStartArmor=player.armor;
   // reset world position
   player.pos.set(0,0,0); player.yaw=0; player.pitch=0; player.vel.set(0,0,0);
   clearActors();
-  spawnWave();
   setMode('playing');
   bigMsg('契約: '+mission.name);
-  ticker('ウェーブ 1 / '+mission.waves.length+' — 敵を撃破せよ');
+  spawnStage();
   Audio.resume();
 }
 function clearActors(){
   enemies.forEach(e=>scene.remove(e.grp)); enemies=[];
+  structures.forEach(s=>scene.remove(s.grp)); structures=[];
   projectiles.forEach(p=>scene.remove(p.mesh)); projectiles=[];
   beams=[]; target=null;
   salvo=[]; shake=0; fxQueue=[];
   explosions.forEach(e=>scene.remove(e.mesh)); explosions=[];
   pfx.forEach(f=>scene.remove(f.mesh)); pfx=[];
 }
-function spawnWave(){
-  const list = mission.waves[waveIdx];
-  list.forEach((type,i)=>{
-    const f=FOES[type];
-    const ang = (i/list.length)*Math.PI*2 + Math.random();
-    const dist = 380+Math.random()*180;
-    const grp = buildMech(f);
-    const pos = new THREE.Vector3(Math.cos(ang)*dist, 0, Math.sin(ang)*dist);
-    grp.position.copy(pos);
-    scene.add(grp);
-    const rnd=r=>r[0]+Math.random()*(r[1]-r[0]);
-    enemies.push({grp, def:f, type, pos, hp:f.structure, maxhp:f.structure, fireCd:1+Math.random(), alive:true,
-      vy:0,                                   // vertical velocity (jump jets)
-      jumping:false, jetT:0,                  // airborne flag + flame-puff throttle
-      strafeDir:(Math.random()<0.5?1:-1),     // current circling direction
-      strafeCd:rnd(f.strafeCd||[1.5,3]),      // time until next direction flip
-      jumpCd:rnd(f.jumpCd||[5,9]),            // time until next jump
-      mode:'strafe', modeCd:1+Math.random()*2,// current tactical behavior + timer
-    });
+// spawn one enemy of `type`, centered on the player (so later stages appear nearby)
+function spawnFoe(type, ang, dist){
+  const f=FOES[type];
+  const grp=buildMech(f);
+  const x=clamp(player.pos.x+Math.cos(ang)*dist, -ARENA+40, ARENA-40);
+  const z=clamp(player.pos.z+Math.sin(ang)*dist, -ARENA+40, ARENA-40);
+  const pos=new THREE.Vector3(x,0,z);
+  grp.position.copy(pos);
+  scene.add(grp);
+  const rnd=r=>r[0]+Math.random()*(r[1]-r[0]);
+  enemies.push({grp, def:f, type, pos, hp:f.structure, maxhp:f.structure, fireCd:1+Math.random(), alive:true,
+    vy:0, jumping:false, jetT:0,
+    strafeDir:(Math.random()<0.5?1:-1),
+    strafeCd:rnd(f.strafeCd||[1.5,3]),
+    jumpCd:rnd(f.jumpCd||[5,9]),
+    mode:'strafe', modeCd:1+Math.random()*2,
   });
 }
-function nextWaveOrWin(){
-  waveIdx++;
-  if(waveIdx>=mission.waves.length){ winMission(); return; }
-  bigMsg('ウェーブ '+(waveIdx+1));
-  ticker('ウェーブ '+(waveIdx+1)+' / '+mission.waves.length+' 接近中');
-  setTimeout(spawnWave, 1400);
+// ambush foes drop in close + mostly behind the player; normal foes ring in at range
+function spawnFoes(list, ambush){
+  if(!list) return;
+  list.forEach((type,i)=>{
+    const spread=(i/list.length)*Math.PI*2 + Math.random()*0.8;
+    const ang = ambush ? (player.yaw+Math.PI + spread*0.5) : spread;
+    const dist = ambush ? (150+Math.random()*120) : (360+Math.random()*180);
+    spawnFoe(type, ang, dist);
+  });
+}
+function spawnStructure(type, ang, dist){
+  const def=STRUCTS[type];
+  const grp=buildStructure(type);
+  const x=clamp(player.pos.x+Math.cos(ang)*dist, -ARENA+50, ARENA-50);
+  const z=clamp(player.pos.z+Math.sin(ang)*dist, -ARENA+50, ARENA-50);
+  grp.position.set(x,0,z); scene.add(grp);
+  structures.push({grp, def, type, pos:new THREE.Vector3(x,0,z), hp:def.hp, maxhp:def.hp, alive:true,
+    isObjective:true, radius:def.hitR, aimY:def.aimY, height:def.height, fireCd:1.2+Math.random()*1.5});
+}
+function spawnStage(){
+  const st=mission._stages[stageIdx];
+  stageReinforced=false; stageEnding=false;
+  // objective facilities — scatter at mid distance around the player
+  const sl=st.structures||[];
+  sl.forEach((type,i)=>{
+    const ang=(i/sl.length)*Math.PI*2 + (Math.random()-0.5)*0.6 + Math.random();
+    spawnStructure(type, ang, 240+Math.random()*220);
+  });
+  spawnFoes(st.foes, st.ambush);
+  const n=mission._stages.length;
+  bigMsg(st.ambush ? '⚠ 待ち伏せ！' : (st.msg ? st.msg : '段階 '+(stageIdx+1)+' / '+n));
+  if(st.ambush) Audio.warn();
+  objectiveTicker();
+}
+// stage is clear once every foe AND every objective facility is destroyed
+function checkStageClear(){
+  if(stageEnding) return;                    // already advancing — ignore re-entrant kills
+  const foesLeft = enemies.some(e=>e.alive);
+  const objLeft  = structures.some(s=>s.alive && s.isObjective);
+  if(!foesLeft && !objLeft) nextStageOrWin();
+}
+function nextStageOrWin(){
+  stageEnding=true;
+  stageIdx++;
+  if(stageIdx>=mission._stages.length){ winMission(); return; }
+  const st=mission._stages[stageIdx];
+  bigMsg(st.ambush ? '⚠ 待ち伏せ！' : '段階 '+(stageIdx+1)+' / '+mission._stages.length);
+  ticker('次の目標へ — 接近中…');
+  setTimeout(()=>{ if(STATE.mode==='playing') spawnStage(); }, 1500);
+}
+// HUD ticker: show facility-destruction progress when objectives exist, else foe count
+function objectiveTicker(){
+  const tot=structures.filter(s=>s.isObjective).length;
+  const down=structures.filter(s=>s.isObjective && !s.alive).length;
+  const en=enemies.filter(e=>e.alive).length;
+  if(tot>0) ticker('◈ 施設破壊 '+down+'/'+tot+'　▸ 敵機 '+en);
+  else ticker('敵を掃討せよ ▸ 残り '+en+' 機');
 }
 
 function winMission(){
-  const reward = mission.reward + killsThisMission*5000;
+  const reward = mission.reward + killsThisMission*5000 + structKills*9000;
   SAVE.credits += reward;
   SAVE.stats.missions++;
   // persist armor damage state
@@ -1062,7 +1232,7 @@ function fireGroup(grp){
   const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
   // gentle aim-assist: if a locked target sits near the crosshair, bias toward it
   if(target && target.alive){
-    const tc=target.pos.clone(); tc.y=20*target.def.scale;
+    const tc=target.pos.clone(); tc.y = target.aimY!=null ? target.aimY : 20*(target.def.scale||1);
     const td=tc.clone().sub(origin).normalize();
     if(td.dot(dir) > 0.955) dir.lerp(td, 0.55).normalize();
   }
@@ -1096,7 +1266,7 @@ function fireWeapon(w, origin, dir){
     const hit = raycastEnemies(origin, dir, d.range);
     const end = origin.clone().add(dir.clone().multiplyScalar(hit?hit.dist:d.range));
     beams.push({a, b:end, life:0.16, color:d.color, w: heavy?5:3});
-    if(hit){ damageEnemy(hit.enemy, d.dmg); fxSpark(end, d.color); fxFlash(end, d.color, 4); }
+    if(hit){ damageAny(hit, d.dmg); fxSpark(end, d.color); fxFlash(end, d.color, 4); }
     addShake(heavy?0.28:0.1);
   } else if(d.type==='missile'){
     // ripple fire — when an enemy is locked, ALL missiles (SRM含む) home toward it
@@ -1141,6 +1311,18 @@ function raycastEnemies(origin, dir, range){
       if(!best || t<best.dist) best={enemy:e, dist:t};
     }
   }
+  // facilities — vertical-cylinder-ish test (sphere at aim height)
+  for(const s of structures){
+    if(!s.alive) continue;
+    const c = s.pos.clone(); c.y = s.aimY;
+    const t = c.clone().sub(origin).dot(dir);
+    if(t<0 || t>range) continue;
+    const closest = origin.clone().add(dir.clone().multiplyScalar(t));
+    if(closest.distanceTo(c) < s.radius){
+      if(blockedByObstacle(origin, c)) continue;
+      if(!best || t<best.dist) best={enemy:s, dist:t, struct:true};
+    }
+  }
   return best;
 }
 function blockedByObstacle(a,b){
@@ -1161,6 +1343,8 @@ function blockedByObstacle(a,b){
   }
   return false;
 }
+// dispatch a hit to a foe or a facility (raycast result carries .struct)
+function damageAny(hit, dmg){ if(hit.struct) damageStruct(hit.enemy, dmg); else damageEnemy(hit.enemy, dmg); }
 function damageEnemy(e, dmg){
   if(!e.alive) return;
   e.hp -= dmg; Audio.hit();
@@ -1172,9 +1356,59 @@ function damageEnemy(e, dmg){
     Audio.explode();
     if(target===e) target=null;
     mechDeath(e);
-    // wave cleared?
-    if(enemies.every(x=>!x.alive)) nextWaveOrWin();
+    objectiveTicker();
+    checkStageClear();
+  } else objectiveTicker();
+}
+function damageStruct(s, dmg){
+  if(!s.alive) return;
+  s.hp -= dmg; Audio.hit();
+  flashMesh(s.grp);
+  if(s.hp<=0){
+    s.alive=false; scene.remove(s.grp);
+    structKills++;
+    if(target===s) target=null;
+    structDeath(s);
+    // first facility down → defenders counter-attack (skip if the stage is ending)
+    const st=mission && mission._stages[stageIdx];
+    if(st && st.reinforce && !stageReinforced && !stageEnding){
+      stageReinforced=true; bigMsg('敵増援 接近！'); Audio.warn();
+      spawnFoes(st.reinforce, false);
+    }
+    objectiveTicker();
+    checkStageClear();
+  } else objectiveTicker();
+}
+// facility destruction — bigger, longer fireball than a mech; fuel depots chain-detonate
+function structDeath(s){
+  const c=s.pos.clone(); c.y=s.aimY;
+  fxFlash(c, 0xffffff, 22); spawnExplosion(c, true); addShake(0.9);
+  spawnDebris(c, s.def.color, 12);
+  for(let i=0;i<6;i++) fxAfter(i*0.13,()=>{ const p=s.pos.clone();
+    p.x+=(Math.random()-0.5)*s.radius*2; p.y=Math.random()*s.height; p.z+=(Math.random()-0.5)*s.radius*2;
+    spawnExplosion(p, Math.random()<0.4); if(i%2) Audio.explode(); });
+  for(let t=0.2;t<2.6;t+=0.26) fxAfter(t,()=>{ const p=s.pos.clone(); p.y+=6;
+    p.x+=(Math.random()-0.5)*10; p.z+=(Math.random()-0.5)*10; fxPuff(p, 0x2a2d30, 9, 2); });
+  spawnWreck(s.pos, s.def.color, 1.7);
+  if(s.def.chain){
+    // fuel depot: massive blast catches nearby actors
+    Audio.explode();
+    for(const e of enemies){ if(e.alive && e.pos.distanceTo(s.pos)<75) damageEnemy(e, 45); }
+    for(const o of structures){ if(o!==s && o.alive && o.pos.distanceTo(s.pos)<75) damageStruct(o, 70); }
+    const pd=player.pos.distanceTo(s.pos); if(pd<70) hurtPlayer(Math.round((1-pd/70)*40));
   }
+}
+// defensive turret fires at the player (owner:'enemy' so existing impact logic applies)
+function structFire(s){
+  const from=s.pos.clone(); from.y=s.aimY+2;
+  const to=player.pos.clone(); to.y=player.eye;
+  if(blockedByObstacle(from,to)) return;
+  const dir=to.clone().sub(from).normalize();
+  dir.x+=(Math.random()-0.5)*0.03; dir.z+=(Math.random()-0.5)*0.03; dir.normalize();
+  const mesh=new THREE.Mesh(new THREE.SphereGeometry(1.5,6,6), new THREE.MeshBasicMaterial({color:0xff8a4a}));
+  mesh.position.copy(from); scene.add(mesh);
+  projectiles.push({mesh, vel:dir.multiplyScalar(240), dmg:s.def.dmg, range:s.def.range+120, traveled:0, owner:'enemy', splash:0, color:0xff8a4a});
+  Audio.cannon();
 }
 function flashMesh(grp){
   grp.traverse(m=>{ if(m.material && m.material.emissive){ m.material._e=m.material.emissive.getHex(); m.material.emissive.setHex(0xffffff);} });
@@ -1508,6 +1742,22 @@ function update(dt){
     }
   }
 
+  // ---- facilities: blink beacons, spin radar dishes, aim + fire defensive turrets ----
+  const beaconLit = (Math.sin(performance.now()/220) > -0.2) ? 1.4 : 0.12;
+  for(const s of structures){
+    if(!s.alive) continue;
+    const ud=s.grp.userData;
+    if(ud.beacon) ud.beacon.material.emissiveIntensity = beaconLit;
+    if(ud.spin)   ud.spin.rotation.y += dt*0.8;
+    const dx=player.pos.x-s.pos.x, dz=player.pos.z-s.pos.z;
+    const distS=Math.hypot(dx,dz);
+    if(ud.turret) ud.turret.rotation.y = Math.atan2(dx,dz);
+    if(s.def.fires){
+      s.fireCd -= dt;
+      if(s.fireCd<=0 && distS < s.def.range){ structFire(s); s.fireCd = s.def.fireCd*(0.8+Math.random()*0.5); }
+    }
+  }
+
   // ---- missile salvo (ripple fire) — game-time countdown so pause doesn't burst-fire ----
   for(let i=salvo.length-1;i>=0;i--){ const s=salvo[i]; s.delay-=dt; if(s.delay<=0){ launchMissile(s); salvo.splice(i,1); } }
 
@@ -1543,6 +1793,15 @@ function update(dt){
             fxSpark(p.mesh.position, p.color); directHit=true; dead=true; break;
           }
         }
+        // facilities
+        if(!dead) for(const s of structures){ if(!s.alive) continue;
+          const c=s.pos.clone(); c.y=s.aimY;
+          if(p.mesh.position.distanceTo(c) < Math.max(p.proxR||0, s.radius)){
+            damageStruct(s, p.dmg);
+            if(p.splash){ for(const o of structures){ if(o!==s&&o.alive){ const c2=o.pos.clone(); c2.y=o.aimY; if(p.mesh.position.distanceTo(c2)<40) damageStruct(o,p.splash);} } }
+            fxSpark(p.mesh.position, p.color); directHit=true; dead=true; break;
+          }
+        }
       } else {
         const c=player.pos.clone(); c.y=player.eye;
         if(p.mesh.position.distanceTo(c) < 11){ hurtPlayer(p.dmg); fxSpark(p.mesh.position, p.color); dead=true; }
@@ -1552,9 +1811,10 @@ function update(dt){
       // impact feedback
       if(p.splash){
         spawnExplosion(p.mesh.position.clone());
-        // splash damage to nearby enemies on a near-miss (ground/obstacle impact)
+        // splash damage to nearby enemies / facilities on a near-miss (ground/obstacle impact)
         if(!directHit && p.owner==='player'){
           for(const e2 of enemies){ if(e2.alive){ const c2=e2.pos.clone(); c2.y=(e2.pos.y||0)+20; if(p.mesh.position.distanceTo(c2)<34) damageEnemy(e2, p.splash); } }
+          for(const o of structures){ if(o.alive){ const c2=o.pos.clone(); c2.y=o.aimY; if(p.mesh.position.distanceTo(c2)<34) damageStruct(o, p.splash); } }
         }
       } else if(p.owner==='player' && !directHit){
         fxPuff(p.mesh.position, 0x8a8a8a, 2, 0.35);
@@ -1586,19 +1846,24 @@ function update(dt){
   updateHUD();
 }
 
+// all lockable contacts: live foes first, then alive objective facilities
+function targetList(){
+  return enemies.filter(e=>e.alive).concat(structures.filter(s=>s.alive && s.isObjective));
+}
 function pickTarget(){
   let best=null, bestScore=1e9;
   const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
-  for(const e of enemies){ if(!e.alive) continue;
+  for(const e of targetList()){
     const to=e.pos.clone().sub(player.pos); to.y=0; const d=to.length();
     const ang = to.normalize().dot(new THREE.Vector3(dir.x,0,dir.z).normalize());
-    const score = d*(1.4-ang);   // prefer close + ahead
+    let score = d*(1.4-ang);                 // prefer close + ahead
+    if(e.isObjective) score *= 1.3;          // bias toward live foes over facilities
     if(score<bestScore){ bestScore=score; best=e; }
   }
   target=best;
 }
 function cycleTarget(){
-  const live=enemies.filter(e=>e.alive); if(!live.length){target=null;return;}
+  const live=targetList(); if(!live.length){target=null;return;}
   let idx=live.indexOf(target); idx=(idx+1)%live.length; target=live[idx];
 }
 
@@ -1675,6 +1940,22 @@ function drawOverlay(){
     ctx.stroke();
     if(isT){ ctx.fillStyle='#37d6ff'; ctx.font='11px Orbitron, monospace'; ctx.fillText(en.def.name.toUpperCase(), x0, y0-6); }
   }
+  // objective facilities — amber diamond markers + off-screen guidance arrows
+  for(const st of structures){ if(!st.alive || !st.isObjective) continue;
+    const c=st.pos.clone(); c.y=st.aimY; const s=worldToScreen(c);
+    const dist=Math.round(player.pos.distanceTo(st.pos));
+    const isT=st===target;
+    if(s){
+      const r=clamp(2600/s.z, 12, 64);
+      ctx.save(); ctx.strokeStyle=isT?'#37d6ff':'#ffb000'; ctx.fillStyle=isT?'#37d6ff':'#ffb000'; ctx.lineWidth=isT?2.4:1.8;
+      ctx.beginPath(); ctx.moveTo(s.x,s.y-r); ctx.lineTo(s.x+r,s.y); ctx.lineTo(s.x,s.y+r); ctx.lineTo(s.x-r,s.y); ctx.closePath(); ctx.stroke();
+      ctx.globalAlpha=.95; ctx.font='10px Orbitron, monospace';
+      ctx.fillText('◈ '+st.def.name+'  '+dist+'m', s.x-r, s.y-r-5);
+      ctx.restore();
+    } else {
+      drawEdgeArrow(ctx, c, '#ffb000');
+    }
+  }
   // crosshair
   const cx=w/2, cy=h/2;
   const inRange = target && target.alive && player.pos.distanceTo(target.pos) < 600;
@@ -1691,6 +1972,19 @@ function worldToScreen(v){
   const p=v.clone().project(camera);
   if(p.z>1) return null;
   return {x:(p.x*0.5+0.5)*$('#overlay').width, y:(-p.y*0.5+0.5)*$('#overlay').height, z:camera.position.distanceTo(v)};
+}
+// points an arrow from the screen edge toward an off-screen world position
+function drawEdgeArrow(ctx, world, color){
+  const w=ctx.canvas.width, h=ctx.canvas.height, cx=w/2, cy=h/2;
+  const p=world.clone().project(camera);
+  let x=p.x, y=p.y;
+  if(p.z>1){ x=-x; y=-y; }                 // behind camera → mirror to point backwards
+  const ang=Math.atan2(-y, x);             // screen-space angle (y is flipped)
+  const ex=cx+Math.cos(ang)*(w/2-34), ey=cy-Math.sin(ang)*(h/2-34);
+  ctx.save(); ctx.translate(ex,ey); ctx.rotate(-ang);
+  ctx.fillStyle=color; ctx.globalAlpha=.9;
+  ctx.beginPath(); ctx.moveTo(12,0); ctx.lineTo(-7,8); ctx.lineTo(-7,-8); ctx.closePath(); ctx.fill();
+  ctx.restore();
 }
 function drawRadar(){
   const cv=$('#radar'), ctx=cv.getContext('2d'); const S=120, R=56, cx=S/2, cy=S/2;
@@ -1715,6 +2009,17 @@ function drawRadar(){
     if(m>R){ bx=cx+rx*scaleR*R/m; by=cy+rz*scaleR*R/m; }
     ctx.fillStyle = e===target?'#37d6ff':'#ff5a50';
     ctx.fillRect(bx-2,by-2,4,4);
+  }
+  // objective facilities — amber diamonds
+  for(const st of structures){ if(!st.alive || !st.isObjective) continue;
+    const dx=st.pos.x-player.pos.x, dz=st.pos.z-player.pos.z;
+    const c=Math.cos(player.yaw), s=Math.sin(player.yaw);
+    const rx=dx*c-dz*s, rz=dx*s+dz*c;
+    let bx=cx+rx*scaleR, by=cy+rz*scaleR;
+    const m=Math.hypot(rx,rz)*scaleR;
+    if(m>R){ bx=cx+rx*scaleR*R/m; by=cy+rz*scaleR*R/m; }
+    ctx.fillStyle = st===target?'#37d6ff':'#ffb000';
+    ctx.beginPath(); ctx.moveTo(bx,by-3.4); ctx.lineTo(bx+3.4,by); ctx.lineTo(bx,by+3.4); ctx.lineTo(bx-3.4,by); ctx.fill();
   }
   // player
   ctx.fillStyle='#3dff7a'; ctx.beginPath(); ctx.moveTo(cx,cy-5); ctx.lineTo(cx-4,cy+4); ctx.lineTo(cx+4,cy+4); ctx.fill();
@@ -1761,14 +2066,30 @@ function refreshTitle(){
 }
 
 /* ---------- MISSIONS ---------- */
+// tally foes / facilities across a mission's stages for the briefing UI
+function missionTally(m){
+  const sts=missionStages(m);
+  let foes=0, structs=0, ambush=false;
+  const structTypes={};
+  sts.forEach(s=>{
+    foes += (s.foes?s.foes.length:0) + (s.reinforce?s.reinforce.length:0);
+    (s.structures||[]).forEach(t=>{ structs++; structTypes[t]=(structTypes[t]||0)+1; });
+    if(s.ambush) ambush=true;
+  });
+  return {stages:sts.length, foes, structs, ambush, structTypes};
+}
 function renderMissions(){
   $('#missCredits').textContent=fmt(SAVE.credits)+' C-bills';
   const wrap=$('#missList'); wrap.innerHTML='';
   MISSIONS.forEach(m=>{
     const locked = m.id>SAVE.unlockedMission;
+    const t=missionTally(m);
+    const tags=[t.stages+' 段階', '敵 '+t.foes+'機'];
+    if(t.structs) tags.push('破壊目標 '+t.structs);
+    if(t.ambush)  tags.push('待ち伏せ');
     const row=document.createElement('div'); row.className='mrow';
     row.innerHTML=`<div class="mi"><div class="t">${m.name}</div>
-      <div class="d">${m.waves.length} ウェーブ · 報酬 ${fmt(m.reward)} C-bills + サルベージ</div></div>
+      <div class="d">${tags.join(' · ')} · 報酬 ${fmt(m.reward)} C-bills + サルベージ</div></div>
       <div class="difficulty" style="color:${locked?'#5e7a64':'var(--amber)'}">${m.diff}</div>`;
     const btn=document.createElement('button'); btn.className='btn'; btn.textContent=locked?'ロック':'説明';
     btn.disabled=locked;
@@ -1778,10 +2099,19 @@ function renderMissions(){
 }
 function openBrief(mi){
   const m=MISSIONS[mi]; window._brief=mi;
+  const t=missionTally(m);
   $('#brTitle').textContent=m.name;
-  $('#brDesc').textContent='作戦区域で敵ランス（部隊）を確認。全ウェーブの敵メックを撃破せよ。掃討確認後に味方が回収に向かう。';
-  $('#brWaves').innerHTML='交戦規模: <b>'+m.waves.length+' ウェーブ</b> / 敵総数 '+m.waves.reduce((a,w)=>a+w.length,0)+' 機';
-  $('#brReward').innerHTML='契約報酬: <b style="color:var(--amber)">'+fmt(m.reward)+' C-bills</b> + 撃破サルベージ 1機につき 5,000';
+  $('#brDesc').textContent = m.briefing ||
+    '作戦区域で敵部隊を確認。全段階の敵を撃破せよ。掃討確認後に味方が回収に向かう。';
+  let waves='作戦規模: <b>'+t.stages+' 段階</b> / 敵総数 '+t.foes+' 機';
+  if(t.structs){
+    const names=Object.keys(t.structTypes).map(k=>STRUCTS[k].name+'×'+t.structTypes[k]).join('・');
+    waves+='<br>破壊目標: <b style="color:var(--amber)">'+names+'</b>';
+  }
+  if(t.ambush) waves+='<br><span style="color:var(--red)">⚠ 待ち伏せの情報あり — 接近時に警戒せよ</span>';
+  $('#brWaves').innerHTML=waves;
+  $('#brReward').innerHTML='契約報酬: <b style="color:var(--amber)">'+fmt(m.reward)+
+    ' C-bills</b> + 撃破サルベージ 1機 5,000'+(t.structs?' / 施設破壊 1基 9,000':'');
   const cs=cstate(SAVE.current);
   const armPct=Math.round(cs.armor/maxArmorOf(SAVE.current)*100);
   $('#brMech').innerHTML=`搭乗機: <b>${CHASSIS[SAVE.current].name}</b> · 装甲 ${armPct}% · 武器 ${cstate(SAVE.current).loadout.length} 基装備`+
@@ -1798,6 +2128,7 @@ function showResult(win, reward){
   if(win){
     $('#resBody').innerHTML =
       `敵撃破数: <b>${killsThisMission}</b><br>`+
+      (structKills?`施設破壊: <b>${structKills}</b> 基<br>`:'')+
       `被ダメージ: <b>${Math.round(missionStartArmor-player.armor)}</b> 装甲<br>`+
       `報酬: <span class="credits">${fmt(reward)} C-bills</span><br>`+
       `資金: <b>${fmt(SAVE.credits)} C-bills</b>`;
