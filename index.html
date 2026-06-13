@@ -1021,6 +1021,7 @@ function spawnWave(){
       strafeDir:(Math.random()<0.5?1:-1),     // current circling direction
       strafeCd:rnd(f.strafeCd||[1.5,3]),      // time until next direction flip
       jumpCd:rnd(f.jumpCd||[5,9]),            // time until next jump
+      mode:'strafe', modeCd:1+Math.random()*2,// current tactical behavior + timer
     });
   });
 }
@@ -1098,8 +1099,8 @@ function fireWeapon(w, origin, dir){
     if(hit){ damageEnemy(hit.enemy, d.dmg); fxSpark(end, d.color); fxFlash(end, d.color, 4); }
     addShake(heavy?0.28:0.1);
   } else if(d.type==='missile'){
-    // ripple fire — stream missiles out one after another (本家LRM/SRMのイメージ)
-    const tgt = d.homing && target && target.alive ? target : null;
+    // ripple fire — when an enemy is locked, ALL missiles (SRM含む) home toward it
+    const tgt = (target && target.alive) ? target : null;
     const n = d.count||1;
     for(let i=0;i<n;i++) salvo.push({d, origin:origin.clone(), dir:dir.clone(), delay: i*0.05, homing:tgt});
     fxFlash(muzzle, 0xffd27a, 3);
@@ -1276,7 +1277,7 @@ function launchMissile(s){
   const v=s.dir.clone();
   const spread=0.06;
   v.x+=(Math.random()-0.5)*spread; v.y+=(Math.random()-0.5)*spread; v.z+=(Math.random()-0.5)*spread; v.normalize();
-  if(s.homing){ v.y += 0.45+Math.random()*0.3; v.normalize(); }   // classic LRM upward arc, homing pulls it down
+  if(d.homing && s.homing){ v.y += 0.45+Math.random()*0.3; v.normalize(); }   // LRM upward lob; homing pulls it down
   v.multiplyScalar(d.proj);
   const mesh=new THREE.Mesh(GEO_FX, new THREE.MeshBasicMaterial({color:d.color}));
   mesh.scale.setScalar(1.4);
@@ -1284,7 +1285,7 @@ function launchMissile(s){
   start.x+=(Math.random()-0.5)*3; start.y+=-1.4+(Math.random()-0.5)*2; start.z+=(Math.random()-0.5)*3;
   mesh.position.copy(start); scene.add(mesh);
   projectiles.push({mesh, vel:v, dmg:d.dmg, range:d.range, traveled:0, owner:'player', speed:d.proj,
-    splash:d.splash||0, homing:s.homing||null, color:d.color, trail:true, trailT:0});
+    splash:d.splash||0, homing:s.homing||null, proxR:18, color:d.color, trail:true, trailT:0});
   fxFlash(start, 0xffe2a0, 4);
   Audio.launch(); addShake(0.18);
 }
@@ -1420,17 +1421,33 @@ function update(dt){
     if(e.strafeCd<=0){ e.strafeDir*=-1; e.strafeCd = rndR(f.strafeCd||[1.5,3]); }
     const perp = new THREE.Vector3(-toP.z, 0, toP.x).multiplyScalar(e.strafeDir);
 
-    // ---- pick a horizontal movement vector based on personality + range band ----
+    // ---- tactical mode switching so circling foes don't strafe forever ----
+    e.modeCd -= dt;
+    if(e.modeCd<=0){
+      const r=Math.random();
+      if(move==='plodder'||move==='bruiser') e.mode='advance';                 // heavies just grind in
+      else if(move==='jumpjet')              e.mode = r<0.6?'advance':'strafe'; // flyers stay aggressive
+      else                                   e.mode = r<0.34?'strafe' : r<0.6?'advance' : r<0.8?'hold' : 'retreat';
+      e.modeCd = 1.2+Math.random()*2.2;
+      if(Math.random()<0.5) e.strafeDir*=-1;   // often reverse the circle when switching
+    }
+
+    // ---- pick a horizontal movement vector based on personality + range band + mode ----
     const band = f.range*0.7;
     let mv = new THREE.Vector3();
-    // how much each archetype likes to circle vs. charge
     const weave = move==='jumpjet'?0.75 : move==='skirmish'?0.5 : move==='strafer'?0.45 : move==='bruiser'?0.18 : 0.12;
     if(distP > band*1.15){
-      mv.copy(toP).addScaledVector(perp, weave);          // close in, weaving
-    } else if(distP < band*0.55){
+      mv.copy(toP).addScaledVector(perp, weave);          // out of band — must close in
+    } else if(distP < band*0.5){
       mv.copy(toP).multiplyScalar(-1).addScaledVector(perp, weave*0.9); // too close — back off
+    } else if(e.mode==='advance'){
+      mv.copy(toP).addScaledVector(perp, weave*0.6);      // press the attack
+    } else if(e.mode==='retreat'){
+      mv.copy(toP).multiplyScalar(-0.7).addScaledVector(perp, weave); // give ground while circling
+    } else if(e.mode==='hold'){
+      mv.copy(perp).multiplyScalar(weave*0.35);           // mostly stand and fire
     } else {
-      mv.copy(perp).multiplyScalar(weave).addScaledVector(toP, distP>band?0.2:-0.2); // hold band
+      mv.copy(perp).multiplyScalar(weave).addScaledVector(toP, distP>band?0.2:-0.2); // circle-strafe
     }
     mv.y=0; if(mv.lengthSq()>1e-4) mv.normalize();
 
@@ -1500,9 +1517,12 @@ function update(dt){
     if(p.homing && p.homing.alive){
       // steer without losing speed (plain lerp shortens the vector → missiles stall)
       const sp=p.speed||p.vel.length();
-      const tc=p.homing.pos.clone(); tc.y=(p.homing.pos.y||0)+20;
-      const want=tc.sub(p.mesh.position).normalize();
-      p.vel.normalize().lerp(want, 0.08).setLength(sp);
+      const tc=p.homing.pos.clone(); tc.y=(p.homing.pos.y||0)+18;
+      const toT=tc.sub(p.mesh.position); const dist=toT.length();
+      const want=toT.normalize();
+      // turn harder as it closes so it can still catch a strafing target
+      const steer=clamp(0.12 + 36/Math.max(dist,1), 0.12, 0.55);
+      p.vel.normalize().lerp(want, steer).setLength(sp);
     }
     const stepv=p.vel.clone().multiplyScalar(dt);
     p.mesh.position.add(stepv); p.traveled += stepv.length();
@@ -1516,7 +1536,8 @@ function update(dt){
       if(p.owner==='player'){
         for(const e of enemies){ if(!e.alive) continue;
           const c=e.pos.clone(); c.y=(e.pos.y||0)+20*e.def.scale;
-          if(p.mesh.position.distanceTo(c) < 12*e.def.scale){
+          const hitR = Math.max(p.proxR||0, 12*e.def.scale);   // missiles get a wider detonation radius
+          if(p.mesh.position.distanceTo(c) < hitR){
             damageEnemy(e, p.dmg);
             if(p.splash){ for(const e2 of enemies){ if(e2!==e&&e2.alive){ const c2=e2.pos.clone(); c2.y=(e2.pos.y||0)+20; if(p.mesh.position.distanceTo(c2)<40) damageEnemy(e2,p.splash);} } }
             fxSpark(p.mesh.position, p.color); directHit=true; dead=true; break;
@@ -1935,6 +1956,8 @@ let pointerLocked=false;
 let gpConnected=false;          // a gamepad (Switch Pro等) is present
 let gpLastSeen=0;               // performance.now() of last readable frame
 let gpStamp=-1;                 // last gamepad.timestamp seen (to detect stalls)
+let gpFreshAt=0;               // performance.now() when ts last advanced
+let gpFrozen=false;            // pad state stuck (iOS Bluetooth throttle)
 let frameCount=0;               // rAF heartbeat — proves the loop is alive
 const fireHeld={1:false,2:false};   // hold-to-fire for both touch and mouse
 
@@ -1985,8 +2008,13 @@ function initInput(){
   // gamepad connect/disconnect (polling does the real work; these refresh UI)
   addEventListener('gamepadconnected', ()=>{ gpConnected=true; refreshTouchUI(); });
   addEventListener('gamepaddisconnected', ()=>{ if(!getActivePad()){ gpConnected=false; refreshTouchUI(); } });
-  // returning to the tab resets the frame clock (no dt spike) and re-arms the wake lock
-  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ if(clock) clock.getDelta(); if(STATE.mode==='playing') keepActive(true); } });
+  // returning to the tab resets the frame clock (no dt spike), re-arms the wake lock, and re-syncs the pad clock
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ if(clock) clock.getDelta(); gpFreshAt=performance.now(); gpFrozen=false; if(STATE.mode==='playing') keepActive(true); gpKick(); } });
+  // any user gesture also nudges a stalled pad and re-syncs its clock
+  const wakePad=()=>{ gpFreshAt=performance.now(); gpKick(); };
+  addEventListener('pointerdown', wakePad, {passive:true});
+  addEventListener('touchstart', wakePad, {passive:true});
+  addEventListener('keydown', wakePad);
 }
 
 function initTouch(){
@@ -2051,8 +2079,17 @@ function pollGamepad(dt){
     if(gpConnected && now-gpLastSeen>1500){ gpConnected=false; refreshTouchUI(); }
     return;
   }
-  gpLastSeen=now; gpStamp=gp.timestamp;
+  gpLastSeen=now;
   if(!gpConnected){ gpConnected=true; refreshTouchUI(); Audio.resume(); }
+  // --- frozen-pad detection: rAF keeps running but gamepad.timestamp stops advancing ---
+  if(gp.timestamp!==gpStamp){ gpStamp=gp.timestamp; gpFreshAt=now; if(gpFrozen){ gpFrozen=false; ticker('コントローラー復帰'); } }
+  if(STATE.mode==='playing' && now-gpFreshAt>800){
+    if(!gpFrozen){ gpFrozen=true; bigMsg('入力停止 — 自動復帰中'); ticker('直らない時は別タブへ一瞬切替で復帰します'); }
+    gpKick();                                   // try to wake the HID/audio pipeline
+    moveVec.x=0; moveVec.y=0;                    // neutralize stuck inputs so the mech doesn't run away
+    fireHeld[1]=fireHeld[2]=false; keys['jet']=false;
+    return;                                      // ignore stale axis/button snapshot this frame
+  }
   const ax=gp.axes, btn=gp.buttons||[];
   const dz=v=>Math.abs(v)<0.18?0:v;
   let mx=dz(ax[0]||0), my=dz(ax[1]||0);
@@ -2077,6 +2114,15 @@ function pollGamepad(dt){
     gpFresh(btn,'mPlus',9,()=>{ if(STATE.mode==='paused') resumeGame(); });
   }
 }
+// best-effort nudge to unstick a throttled Bluetooth gamepad (iOS Safari)
+let gpKickAt=0;
+function gpKick(){
+  const now=performance.now(); if(now-gpKickAt<300) return; gpKickAt=now;   // throttle attempts
+  try{ const gp=getActivePad(); if(gp&&gp.vibrationActuator&&gp.vibrationActuator.playEffect){
+    gp.vibrationActuator.playEffect('dual-rumble',{duration:30,strongMagnitude:0,weakMagnitude:0}); } }catch(e){}
+  try{ Audio.resume(); Audio.keepAlive(true); }catch(e){}
+  try{ navigator.getGamepads&&navigator.getGamepads(); }catch(e){}
+}
 function refreshTouchUI(){
   $('#touch').classList.toggle('on', STATE.mode==='playing' && isTouch && !gpConnected);
   $('#hud').classList.toggle('touchui', isTouch && !gpConnected);
@@ -2095,8 +2141,8 @@ function updateGpDebug(){
   if(!gpConnected && !window._gpDebugForce){ el.style.display='none'; return; }
   const gp=getActivePad();
   el.style.display='block';
-  const stale = gp ? Math.round(performance.now()-gpLastSeen) : '-';
-  el.textContent='F:'+frameCount+'  PAD:'+(gp?'y':'n')+'  ts:'+(gp?Math.round(gp.timestamp):'-')+'  age:'+stale+'ms';
+  const tsAge = gp ? Math.round(performance.now()-gpFreshAt) : '-';
+  el.textContent='F:'+frameCount+'  PAD:'+(gp?'y':'n')+'  ts:'+(gp?Math.round(gp.timestamp):'-')+'  tsAge:'+tsAge+'ms'+(gpFrozen?'  ❄FROZEN':'');
 }
 
 /* ---------- pause ---------- */
