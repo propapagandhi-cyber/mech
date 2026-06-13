@@ -529,19 +529,28 @@ const CHASSIS = {
 };
 
 /* ---------- DATA: enemy templates ---------- */
+// move: movement personality — controls strafing weight, juke & jump cadence.
+//   skirmish = weave + circle, jumps often   strafer = circle-strafe at range
+//   jumpjet  = airborne harasser, jets constantly   bruiser = slow advance, rare leap
+// jump: jump-jet thrust (0 = grounded). jumpCd/strafeCd = [min,max] seconds between events.
 const FOES = {
-  scout: {name:'ローカスト',   structure:70,  speed:40, dmg:6,  fireCd:0.9, range:280, color:0x7fd0ff, scale:0.78, reward:9000},
-  med:   {name:'ハンチバック',structure:150, speed:26, dmg:14, fireCd:1.3, range:340, color:0xff8a4a, scale:1.0,  reward:18000},
-  heavy: {name:'ウォーハンマー',structure:260, speed:18, dmg:24, fireCd:1.7, range:430, color:0xff5a5a, scale:1.22, reward:34000},
+  scout: {name:'ローカスト',   structure:70,  speed:40, dmg:6,  fireCd:0.9, range:280, color:0x7fd0ff, scale:0.78, reward:9000,
+          move:'skirmish', jump:1.15, jumpCd:[2.4,4.2], strafeCd:[0.7,1.5]},
+  wasp:  {name:'ワスプ',      structure:95,  speed:44, dmg:8,  fireCd:1.0, range:300, color:0x9affd0, scale:0.72, reward:13000,
+          move:'jumpjet',  jump:1.7,  jumpCd:[1.0,2.2], strafeCd:[0.6,1.1]},
+  med:   {name:'ハンチバック',structure:150, speed:26, dmg:14, fireCd:1.3, range:340, color:0xff8a4a, scale:1.0,  reward:18000,
+          move:'strafer',  jump:0.7,  jumpCd:[4.5,8],   strafeCd:[1.4,3]},
+  heavy: {name:'ウォーハンマー',structure:260, speed:18, dmg:24, fireCd:1.7, range:430, color:0xff5a5a, scale:1.22, reward:34000,
+          move:'bruiser',  jump:0.5,  jumpCd:[7,13],    strafeCd:[2.5,4.5]},
 };
 
 /* ---------- DATA: missions ---------- */
 const MISSIONS = [
-  {id:0, name:'前哨小競り合い',  diff:'★☆☆☆', reward:55000,  waves:[['scout','scout'],['scout','med']]},
-  {id:1, name:'国境襲撃',      diff:'★★☆☆', reward:90000,  waves:[['scout','med'],['med','med'],['med','scout','scout']]},
-  {id:2, name:'補給線遮断',    diff:'★★★☆', reward:150000, waves:[['med','med'],['heavy','scout'],['med','med','scout']]},
-  {id:3, name:'威力偵察',   diff:'★★★☆', reward:210000, waves:[['med','med','scout'],['heavy','med'],['heavy','heavy']]},
-  {id:4, name:'指揮系統破壊',     diff:'★★★★', reward:340000, waves:[['heavy','med','med'],['heavy','heavy'],['heavy','heavy','med','scout']]},
+  {id:0, name:'前哨小競り合い',  diff:'★☆☆☆', reward:55000,  waves:[['scout','scout'],['scout','wasp']]},
+  {id:1, name:'国境襲撃',      diff:'★★☆☆', reward:90000,  waves:[['scout','med'],['wasp','med'],['med','scout','wasp']]},
+  {id:2, name:'補給線遮断',    diff:'★★★☆', reward:150000, waves:[['med','wasp'],['heavy','scout'],['med','med','wasp']]},
+  {id:3, name:'威力偵察',   diff:'★★★☆', reward:210000, waves:[['med','wasp','scout'],['heavy','med'],['heavy','wasp','wasp']]},
+  {id:4, name:'指揮系統破壊',     diff:'★★★★', reward:340000, waves:[['heavy','med','med'],['heavy','wasp','wasp'],['heavy','heavy','med','wasp']]},
 ];
 
 /* ---------- SAVE ---------- */
@@ -968,7 +977,14 @@ function spawnWave(){
     const pos = new THREE.Vector3(Math.cos(ang)*dist, 0, Math.sin(ang)*dist);
     grp.position.copy(pos);
     scene.add(grp);
-    enemies.push({grp, def:f, type, pos, hp:f.structure, maxhp:f.structure, fireCd:1+Math.random(), alive:true});
+    const rnd=r=>r[0]+Math.random()*(r[1]-r[0]);
+    enemies.push({grp, def:f, type, pos, hp:f.structure, maxhp:f.structure, fireCd:1+Math.random(), alive:true,
+      vy:0,                                   // vertical velocity (jump jets)
+      jumping:false, jetT:0,                  // airborne flag + flame-puff throttle
+      strafeDir:(Math.random()<0.5?1:-1),     // current circling direction
+      strafeCd:rnd(f.strafeCd||[1.5,3]),      // time until next direction flip
+      jumpCd:rnd(f.jumpCd||[5,9]),            // time until next jump
+    });
   });
 }
 function nextWaveOrWin(){
@@ -1074,7 +1090,7 @@ function raycastEnemies(origin, dir, range){
   let best=null;
   for(const e of enemies){
     if(!e.alive) continue;
-    const c = e.pos.clone(); c.y = 20*e.def.scale;
+    const c = e.pos.clone(); c.y = (e.pos.y||0)+20*e.def.scale;
     const oc = c.clone().sub(origin);
     const t = oc.dot(dir);
     if(t<0 || t>range) continue;
@@ -1183,7 +1199,7 @@ function launchMissile(s){
 }
 
 function enemyFire(e){
-  const from = e.pos.clone(); from.y=20*e.def.scale;
+  const from = e.pos.clone(); from.y=(e.pos.y||0)+20*e.def.scale;
   const to = player.pos.clone(); to.y=player.eye;
   if(blockedByObstacle(from,to)) return;
   const dir = to.clone().sub(from).normalize();
@@ -1300,24 +1316,61 @@ function update(dt){
   if(!target || !target.alive) pickTarget();
 
   // ---- enemies ----
+  const rndR=r=>r[0]+Math.random()*(r[1]-r[0]);
   for(const e of enemies){
     if(!e.alive) continue;
     const f=e.def;
     const toP = player.pos.clone().sub(e.pos); toP.y=0;
     const distP = toP.length(); toP.normalize();
-    // desired range band
+    const move = f.move||'strafer';
+
+    // ---- periodic direction change (juke / circle reversal) ----
+    e.strafeCd -= dt;
+    if(e.strafeCd<=0){ e.strafeDir*=-1; e.strafeCd = rndR(f.strafeCd||[1.5,3]); }
+    const perp = new THREE.Vector3(-toP.z, 0, toP.x).multiplyScalar(e.strafeDir);
+
+    // ---- pick a horizontal movement vector based on personality + range band ----
     const band = f.range*0.7;
-    let mv = toP.clone();
-    if(distP < band) mv.multiplyScalar(-1);            // back off
-    else if(distP < band*1.15) mv.set(-toP.z,0,toP.x); // strafe
-    // move — with wall-sliding and escape so enemies never get stuck in/against buildings
+    let mv = new THREE.Vector3();
+    // how much each archetype likes to circle vs. charge
+    const weave = move==='jumpjet'?0.9 : move==='skirmish'?0.65 : move==='strafer'?0.45 : 0.2;
+    if(distP > band*1.15){
+      mv.copy(toP).addScaledVector(perp, weave);          // close in, weaving
+    } else if(distP < band*0.55){
+      mv.copy(toP).multiplyScalar(-1).addScaledVector(perp, 0.7); // too close — back off + circle
+    } else {
+      mv.copy(perp).addScaledVector(toP, distP>band?0.25:-0.25);  // hold band, circle-strafe
+    }
+    mv.y=0; if(mv.lengthSq()>1e-4) mv.normalize();
+
+    // ---- jump jets: launch into the air on a timer ----
+    e.jumpCd -= dt;
+    const grounded = e.pos.y<=0.05;
+    if((f.jump||0)>0 && grounded && e.jumpCd<=0 && distP < f.range*1.4){
+      e.vy = 30*f.jump; e.jumping=true; e.jumpCd = rndR(f.jumpCd||[5,9]);
+    }
+    // vertical integration (gravity / landing)
+    if(!grounded || e.vy>0){
+      e.vy -= 78*dt; e.pos.y += e.vy*dt;
+      if(e.pos.y<=0){ e.pos.y=0; e.vy=0; e.jumping=false; }
+    }
+    const airborne = e.pos.y>2;
+    // jet exhaust puffs under the feet while thrusting up
+    if(e.vy>1){ e.jetT-=dt; if(e.jetT<=0){ e.jetT=0.05;
+      const fp=e.pos.clone(); fp.y+=2; fxPuff(fp, 0xffd0a0, 2.4*(f.scale||1), 0.3); } }
+    // airborne mechs glide faster (jets) and can clear buildings
+    const speedMul = airborne ? 1.45 : 1;
+
+    // ---- horizontal move with wall-sliding (skipped while flying over buildings) ----
     const prevX=e.pos.x, prevZ=e.pos.z;
-    const step = mv.multiplyScalar(f.speed*dt);
+    const step = mv.multiplyScalar(f.speed*speedMul*dt);
     const nx = clamp(e.pos.x+step.x,-ARENA,ARENA);
     const nz = clamp(e.pos.z+step.z,-ARENA,ARENA);
     const blocker = (x,z)=>{ for(const o of obstacles){ if(Math.abs(x-o.x)<o.hw && Math.abs(z-o.z)<o.hd) return o; } return null; };
-    const cur = blocker(e.pos.x, e.pos.z);
-    if(cur){
+    const cur = airborne ? null : blocker(e.pos.x, e.pos.z);
+    if(airborne){
+      e.pos.x=nx; e.pos.z=nz;                 // flying — ignore footprints
+    } else if(cur){
       // embedded in a building footprint — shove out along the shallowest axis so it can escape
       const dx = e.pos.x-cur.x, dz = e.pos.z-cur.z;
       const penX = cur.hw-Math.abs(dx), penZ = cur.hd-Math.abs(dz);
@@ -1341,6 +1394,8 @@ function update(dt){
     const ud=e.grp.userData;
     if(ud && ud.torsoG){ ud.torsoG.rotation.y=aimYaw; ud.legsG.rotation.y=e.legYaw; }
     else e.grp.rotation.y=aimYaw;
+    // legs tuck (lean back) while airborne for a jump-jet silhouette
+    if(ud && ud.legsG) ud.legsG.rotation.x = lerpAngle(ud.legsG.rotation.x||0, airborne?-0.5:0, Math.min(1,dt*5));
     // fire
     e.fireCd -= dt;
     if(e.fireCd<=0 && distP < f.range){
@@ -1357,7 +1412,7 @@ function update(dt){
     if(p.homing && p.homing.alive){
       // steer without losing speed (plain lerp shortens the vector → missiles stall)
       const sp=p.speed||p.vel.length();
-      const tc=p.homing.pos.clone(); tc.y=20;
+      const tc=p.homing.pos.clone(); tc.y=(p.homing.pos.y||0)+20;
       const want=tc.sub(p.mesh.position).normalize();
       p.vel.normalize().lerp(want, 0.08).setLength(sp);
     }
@@ -1372,10 +1427,10 @@ function update(dt){
     if(!dead){
       if(p.owner==='player'){
         for(const e of enemies){ if(!e.alive) continue;
-          const c=e.pos.clone(); c.y=20*e.def.scale;
+          const c=e.pos.clone(); c.y=(e.pos.y||0)+20*e.def.scale;
           if(p.mesh.position.distanceTo(c) < 12*e.def.scale){
             damageEnemy(e, p.dmg);
-            if(p.splash){ for(const e2 of enemies){ if(e2!==e&&e2.alive){ const c2=e2.pos.clone(); c2.y=20; if(p.mesh.position.distanceTo(c2)<40) damageEnemy(e2,p.splash);} } }
+            if(p.splash){ for(const e2 of enemies){ if(e2!==e&&e2.alive){ const c2=e2.pos.clone(); c2.y=(e2.pos.y||0)+20; if(p.mesh.position.distanceTo(c2)<40) damageEnemy(e2,p.splash);} } }
             fxSpark(p.mesh.position, p.color); directHit=true; dead=true; break;
           }
         }
@@ -1390,7 +1445,7 @@ function update(dt){
         spawnExplosion(p.mesh.position.clone());
         // splash damage to nearby enemies on a near-miss (ground/obstacle impact)
         if(!directHit && p.owner==='player'){
-          for(const e2 of enemies){ if(e2.alive){ const c2=e2.pos.clone(); c2.y=20; if(p.mesh.position.distanceTo(c2)<34) damageEnemy(e2, p.splash); } }
+          for(const e2 of enemies){ if(e2.alive){ const c2=e2.pos.clone(); c2.y=(e2.pos.y||0)+20; if(p.mesh.position.distanceTo(c2)<34) damageEnemy(e2, p.splash); } }
         }
       } else if(p.owner==='player' && !directHit){
         fxPuff(p.mesh.position, 0x8a8a8a, 2, 0.35);
@@ -1490,7 +1545,7 @@ function drawOverlay(){
   }
   // target reticle box + leads on all enemies
   for(const en of enemies){ if(!en.alive) continue;
-    const c=en.pos.clone(); c.y=20*en.def.scale; const s=worldToScreen(c);
+    const c=en.pos.clone(); c.y=(en.pos.y||0)+20*en.def.scale; const s=worldToScreen(c);
     if(!s) continue;
     const isT = en===target;
     const r = clamp(2400/s.z, 14, 90);
