@@ -705,6 +705,19 @@ const Audio = (()=>{
       s.connect(g); g.connect(c.destination); s.start();
     }catch(e){}
   }
+  // near-silent looping tone — keeps the page in "active audio" state so iOS
+  // doesn't throttle the tab (which freezes gamepad state updates)
+  let keepNode=null;
+  function keepAlive(on){
+    try{
+      if(!on){ if(keepNode){ keepNode.stop(); keepNode=null; } return; }
+      if(keepNode) return;
+      const c=ac(); c.resume&&c.resume();
+      const o=c.createOscillator(), g=c.createGain();
+      g.gain.value=0.0002; o.frequency.value=40; o.type='sine';
+      o.connect(g); g.connect(c.destination); o.start(); keepNode=o;
+    }catch(e){}
+  }
   return {
     laser:()=>blip(880,0.12,'sawtooth',0.05),
     cannon:()=>{noise(0.09,0.10); blip(140,0.12,'square',0.06);},
@@ -714,6 +727,7 @@ const Audio = (()=>{
     explode:()=>{noise(0.4,0.16); blip(90,0.4,'square',0.07);},
     warn:()=>blip(330,0.18,'square',0.05),
     resume:()=>{ try{ ac().resume(); }catch(e){} },
+    keepAlive,
   };
 })();
 
@@ -1564,7 +1578,7 @@ function setMode(m){
   $('#hud').classList.toggle('on', m==='playing');
   $('#hud').classList.toggle('touchui', isTouch && !gpConnected);   // touch: move panels clear of thumb buttons
   $('#touch').classList.toggle('on', m==='playing' && isTouch && !gpConnected);
-  if(m==='playing'){ hideAllScreens(); }
+  if(m==='playing'){ hideAllScreens(); keepActive(true); } else keepActive(false);
 }
 function hideAllScreens(){ $$('.screen').forEach(s=>s.classList.remove('on')); }
 function showScreen(id){ hideAllScreens(); $('#'+id).classList.add('on'); }
@@ -1824,8 +1838,8 @@ function initInput(){
   // gamepad connect/disconnect (polling does the real work; these refresh UI)
   addEventListener('gamepadconnected', ()=>{ gpConnected=true; refreshTouchUI(); });
   addEventListener('gamepaddisconnected', ()=>{ if(!getActivePad()){ gpConnected=false; refreshTouchUI(); } });
-  // returning to the tab resets the frame clock so the freeze-recovery isn't a dt spike
-  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && clock){ clock.getDelta(); } });
+  // returning to the tab resets the frame clock (no dt spike) and re-arms the wake lock
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ if(clock) clock.getDelta(); if(STATE.mode==='playing') keepActive(true); } });
 }
 
 function initTouch(){
@@ -1921,6 +1935,13 @@ function refreshTouchUI(){
   $('#hud').classList.toggle('touchui', isTouch && !gpConnected);
   if(gpConnected) toast('コントローラー接続');
 }
+/* ---------- keep the tab active so iOS doesn't throttle gamepad updates ---------- */
+let wakeLock=null;
+async function requestWake(){
+  try{ if(navigator.wakeLock && document.visibilityState==='visible'){ wakeLock=await navigator.wakeLock.request('screen'); } }catch(e){}
+}
+function releaseWake(){ try{ wakeLock&&wakeLock.release(); }catch(e){} wakeLock=null; }
+function keepActive(on){ if(on){ requestWake(); Audio.keepAlive(true); } else { releaseWake(); Audio.keepAlive(false); } }
 // live diagnostic readout — tells us, when a freeze happens, WHAT froze
 function updateGpDebug(){
   const el=$('#gpDbg'); if(!el) return;
@@ -1940,8 +1961,9 @@ function pauseGame(){
   $('#sens').value=SAVE.settings.sens; $('#btnSound').textContent=SAVE.settings.sound?'オン':'オフ';
   refreshModeButtons();
   showScreen('scrPause');
+  keepActive(false);
 }
-function resumeGame(){ hideAllScreens(); STATE.mode='playing'; $('#hud').classList.add('on'); if(isTouch&&!gpConnected)$('#touch').classList.add('on'); if(!isTouch&&!gpConnected)$('#scene').requestPointerLock(); }
+function resumeGame(){ hideAllScreens(); STATE.mode='playing'; $('#hud').classList.add('on'); if(isTouch&&!gpConnected)$('#touch').classList.add('on'); if(!isTouch&&!gpConnected)$('#scene').requestPointerLock(); keepActive(true); }
 
 /* ============================================================
    WIRE UP UI
