@@ -1210,8 +1210,8 @@ function update(dt){
   // ---- movement ----
   let fwd=0, strafe=0;
   if(!shutdown){
-    if(keys['w']||keys['arrowup']) fwd+=1; if(keys['s']||keys['arrowdown']) fwd-=1;
-    if(keys['a']||keys['arrowleft']) strafe-=1; if(keys['d']||keys['arrowright']) strafe+=1;
+    if(keys['w']) fwd+=1; if(keys['s']) fwd-=1;
+    if(keys['a']) strafe-=1; if(keys['d']) strafe+=1;
     if(moveVec.x||moveVec.y){ strafe+=moveVec.x; fwd+=-moveVec.y; }
   }
   const sinY=Math.sin(player.yaw), cosY=Math.cos(player.yaw);
@@ -1547,7 +1547,6 @@ function ticker(t){ $('#ticker').textContent=t; }
 function loop(){
   requestAnimationFrame(loop);
   const dt=Math.min(clock.getDelta(),0.05);
-  try{ pollGamepad(dt); }catch(e){ /* no gamepad / API absent */ }
   try{ update(dt); }catch(e){ console.warn('update',e); }
   try{ renderer.render(scene,camera); }catch(e){ console.warn('render',e); }
 }
@@ -1558,9 +1557,9 @@ function loop(){
 function setMode(m){
   STATE.mode=m;
   $('#hud').classList.toggle('on', m==='playing');
-  $('#hud').classList.toggle('touchui', isTouch && !gpConnected);   // touch: move panels clear of thumb buttons
-  $('#touch').classList.toggle('on', m==='playing' && isTouch && !gpConnected);
-  if(m==='playing'){ hideAllScreens(); focusGame(); }
+  $('#hud').classList.toggle('touchui', isTouch);   // touch: move panels clear of thumb buttons
+  $('#touch').classList.toggle('on', m==='playing' && isTouch);
+  if(m==='playing'){ hideAllScreens(); }
 }
 function hideAllScreens(){ $$('.screen').forEach(s=>s.classList.remove('on')); }
 function showScreen(id){ hideAllScreens(); $('#'+id).classList.add('on'); }
@@ -1767,7 +1766,6 @@ function computeTouch(){
 }
 let isTouch = computeTouch();
 let pointerLocked=false;
-let gpConnected=false;          // a gamepad (Switch Pro等) is present
 const fireHeld={1:false,2:false};   // hold-to-fire for both touch and mouse
 
 function setTouchMode(mode){
@@ -1784,29 +1782,21 @@ function refreshModeButtons(){
 
 function initInput(){
   // keyboard
-  const PLAY_KEYS={'w':1,'a':1,'s':1,'d':1,' ':1,'arrowup':1,'arrowdown':1,'arrowleft':1,'arrowright':1,'enter':1,'tab':1};
   addEventListener('keydown', e=>{
     const k=e.key.toLowerCase();
     keys[k]=true;
     if(STATE.mode==='playing'){
       if(k==='1'){ fireHeld[1]=true; }
       if(k==='2'){ fireHeld[2]=true; }
-      if(k==='r'||k==='tab'){ cycleTarget(); }
+      if(k==='r'||k==='tab'){ e.preventDefault(); cycleTarget(); }
       if(k==='escape'){ pauseGame(); }
-      // swallow gameplay keys (incl. controller-as-keyboard arrows/Enter) so the
-      // page can't scroll, move focus, or summon the iOS soft keyboard mid-mission
-      if(PLAY_KEYS[k]) e.preventDefault();
+      if(k==='w'||k==='a'||k==='s'||k==='d'||k===' ') e.preventDefault();
     }
   });
   addEventListener('keyup', e=>{ const k=e.key.toLowerCase(); keys[k]=false; if(k==='1')fireHeld[1]=false; if(k==='2')fireHeld[2]=false; });
 
   // mouse look (pointer lock)
   const cv=$('#scene');
-  // make the canvas a focusable, non-text surface so controller/keyboard input
-  // stays captured here and never lands on a button/field that opens the soft keyboard
-  cv.setAttribute('tabindex','-1'); cv.style.outline='none';
-  // if focus drifts to any element while playing (e.g. iOS focus navigation), pull it back
-  addEventListener('focusin', e=>{ if(STATE.mode==='playing' && e.target!==cv){ try{ e.target.blur&&e.target.blur(); cv.focus({preventScroll:true}); }catch(_){} } });
   cv.addEventListener('click', ()=>{ if(STATE.mode==='playing' && !isTouch && !pointerLocked) cv.requestPointerLock(); });
   document.addEventListener('pointerlockchange', ()=>{ pointerLocked = (document.pointerLockElement===cv); if(!pointerLocked){ fireHeld[1]=fireHeld[2]=false; } });
   addEventListener('mousemove', e=>{ if(pointerLocked){ look.x+=e.movementX; look.y+=e.movementY; } });
@@ -1815,10 +1805,6 @@ function initInput(){
   addEventListener('contextmenu', e=>{ if(STATE.mode==='playing') e.preventDefault(); });
 
   initTouch();   // listeners are harmless when the touch panel is hidden
-
-  // gamepad connect/disconnect (polling does the real work; these just refresh UI)
-  addEventListener('gamepadconnected', ()=>{ gpConnected=true; refreshTouchUI(); });
-  addEventListener('gamepaddisconnected', ()=>{ if(!getActivePad()){ gpConnected=false; refreshTouchUI(); } });
 }
 
 function initTouch(){
@@ -1866,69 +1852,6 @@ function initTouch(){
   tap($('#pauseBtn'), pauseGame);
 }
 
-/* ============================================================
-   GAMEPAD — Switch Pro Controller等（iPadOS Bluetooth, 標準マッピング）
-   毎フレーム getGamepads() をポーリング。Safariはイベントが遅延するため。
-   ============================================================ */
-const gpEdge={};
-let gpLastSeen=0;        // performance.now() of last frame a pad was readable
-function gpFresh(btn,key,i,fn){ const now=!!(btn[i]&&btn[i].pressed); if(now&&!gpEdge[key]) fn(); gpEdge[key]=now; }
-function getActivePad(){
-  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  for(const p of pads){ if(p && p.connected && p.axes && p.axes.length>=2) return p; }
-  return null;
-}
-function pollGamepad(dt){
-  const gp=getActivePad();
-  const now=performance.now();
-  if(!gp){
-    // Safari/iOS can briefly drop the pad from getGamepads() (esp. when analog
-    // input is steady). Don't tear down the controller UI on a short gap — just
-    // stop the mech cleanly so a stale stick value can't make it run away.
-    if(gpConnected){
-      if(STATE.mode==='playing'){ moveVec.x=0; moveVec.y=0; fireHeld[1]=false; fireHeld[2]=false; keys['jet']=false; }
-      if(now-gpLastSeen>1500){ gpConnected=false; refreshTouchUI(); }
-    }
-    return;
-  }
-  gpLastSeen=now;
-  if(!gpConnected){ gpConnected=true; refreshTouchUI(); Audio.resume(); }
-  const ax=gp.axes, btn=gp.buttons||[];
-  const dz=v=>Math.abs(v)<0.18?0:v;
-  let mx=dz(ax[0]||0), my=dz(ax[1]||0);
-  const rx=dz(ax[2]||0), ry=dz(ax[3]||0);
-  const pressed=i=> !!(btn[i] && btn[i].pressed);
-  // D-pad (standard mapping 12-15) drives movement too — digital buttons keep
-  // updating even when WebKit stalls analog-axis refresh, so it's a reliable fallback.
-  if(pressed(12)) my=-1; if(pressed(13)) my=1; if(pressed(14)) mx=-1; if(pressed(15)) mx=1;
-  if(STATE.mode==='playing'){
-    moveVec.x=mx; moveVec.y=my;
-    // right stick: aim. framerate-independent; respects the sensitivity slider.
-    const rate=((SAVE.settings.sens||110)/110)*2.6;
-    player.yaw   -= rx*rate*dt;
-    player.pitch  = clamp(player.pitch - ry*rate*dt, -0.6, 0.5);
-    // ZR/R -> weapon group 1, ZL/L -> group 2, B/A -> jump jet
-    fireHeld[1] = pressed(7)||pressed(5);
-    fireHeld[2] = pressed(6)||pressed(4);
-    keys['jet'] = pressed(0)||pressed(1);
-    gpFresh(btn,'cycleY',3,cycleTarget);   // Y
-    gpFresh(btn,'cycleX',2,cycleTarget);   // X
-    gpFresh(btn,'stickR',11,cycleTarget);  // right-stick click
-    gpFresh(btn,'pause',9,pauseGame);      // + / Start
-    gpFresh(btn,'pause2',8,pauseGame);     // - / Select
-  } else {
-    // menus / pause: A or + confirms-resume
-    gpFresh(btn,'mResume',1,()=>{ if(STATE.mode==='paused') resumeGame(); });
-    gpFresh(btn,'mPlus',9,()=>{ if(STATE.mode==='paused') resumeGame(); });
-  }
-}
-// when a real controller is in use on a touch device, hide the on-screen pad
-function refreshTouchUI(){
-  const showTouch = STATE.mode==='playing' && isTouch && !gpConnected;
-  $('#touch').classList.toggle('on', showTouch);
-  if(gpConnected) toast('コントローラー接続');
-}
-
 /* ---------- pause ---------- */
 function pauseGame(){
   if(STATE.mode!=='playing') return;
@@ -1939,8 +1862,7 @@ function pauseGame(){
   refreshModeButtons();
   showScreen('scrPause');
 }
-function focusGame(){ try{ const a=document.activeElement; a&&a.blur&&a.blur(); $('#scene').focus({preventScroll:true}); }catch(_){} }
-function resumeGame(){ hideAllScreens(); STATE.mode='playing'; $('#hud').classList.add('on'); if(isTouch&&!gpConnected)$('#touch').classList.add('on'); if(!isTouch&&!gpConnected)$('#scene').requestPointerLock(); focusGame(); }
+function resumeGame(){ hideAllScreens(); STATE.mode='playing'; $('#hud').classList.add('on'); if(isTouch)$('#touch').classList.add('on'); if(!isTouch)$('#scene').requestPointerLock(); }
 
 /* ============================================================
    WIRE UP UI
@@ -2073,18 +1995,8 @@ function renderKeys(){
     ['Esc','一時停止 / 設定'],
   ];
   const tm = isTouch? [['左スティック','移動'],['右側ドラッグ','視点・照準'],['射撃 1 / 射撃 2','武器グループ（長押し）'],['JET','ジャンプジェット（長押し）'],['目標 ▸','目標切替'],['❚❚','一時停止 / メニュー']] : rows;
-  const gpRows=[
-    ['左スティック','移動 / 横移動'],
-    ['右スティック','視点・照準'],
-    ['ZR / R','トリガーグループ1で射撃'],
-    ['ZL / L','トリガーグループ2で射撃'],
-    ['A / B','ジャンプジェット'],
-    ['X / Y','目標切替'],
-    ['＋ / －','一時停止 / メニュー'],
-  ];
-  const list = gpConnected ? gpRows : (isTouch?tm:rows);
   const el=$('#keyList'); el.innerHTML='';
-  list.forEach(([k,v])=>{ const a=document.createElement('span'); a.innerHTML='<span class="kbd">'+k+'</span>'; const b=document.createElement('span'); b.textContent=v; el.appendChild(a); el.appendChild(b); });
+  (isTouch?tm:rows).forEach(([k,v])=>{ const a=document.createElement('span'); a.innerHTML='<span class="kbd">'+k+'</span>'; const b=document.createElement('span'); b.textContent=v; el.appendChild(a); el.appendChild(b); });
 }
 
 /* ============================================================
