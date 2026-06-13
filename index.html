@@ -670,6 +670,7 @@ function updateSaveStatus(){
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+function lerpAngle(a,b,t){ let d=(b-a)%(Math.PI*2); if(d>Math.PI)d-=Math.PI*2; if(d<-Math.PI)d+=Math.PI*2; return a+d*t; }
 const fmt = n => Math.round(n).toLocaleString('en-US');
 const TYPE_JP = {energy:'エネルギー', ballistic:'実弾', missile:'ミサイル'};
 function toast(t, bad){ const el=$('#toast'); el.textContent=t; el.className='toast on'+(bad?' bad':''); clearTimeout(el._t); el._t=setTimeout(()=>el.className='toast',1800); }
@@ -720,6 +721,60 @@ const Audio = (()=>{
 let renderer, scene, camera, clock;
 const ARENA = 620;            // half-size of square arena
 let obstacles = [];           // {mesh, box:THREE.Box3, r}
+
+/* ---------- procedural textures (no image assets needed) ---------- */
+const TEX={};
+function canvasTex(w,h,draw){
+  const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+  draw(cv.getContext('2d'),w,h);
+  const t=new THREE.CanvasTexture(cv);
+  t.wrapS=t.wrapT=THREE.RepeatWrapping;
+  return t;
+}
+function initTextures(){
+  // building facades — window grid with a few lit rooms (3 variants)
+  TEX.bld=[];
+  for(let v=0;v<3;v++){
+    TEX.bld.push(canvasTex(128,128,c=>{
+      c.fillStyle='#161d18'; c.fillRect(0,0,128,128);
+      for(let i=0;i<260;i++){ c.fillStyle='rgba(255,255,255,'+(Math.random()*0.03)+')'; c.fillRect(Math.random()*128,Math.random()*128,2,2); }
+      const cols=5, rows=7, cw=128/cols, rh=128/rows;
+      for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+        const wx=x*cw+5, wy=y*rh+4, ww=cw-10, wh=rh-9;
+        const lit=Math.random()<0.20;
+        c.fillStyle = lit? (Math.random()<0.7?'#9fffc0':'#ffd98a') : '#0a0f0c';
+        c.fillRect(wx,wy,ww,wh);
+        if(!lit){ c.fillStyle='rgba(120,170,210,0.09)'; c.fillRect(wx,wy,ww,wh/3); }
+        c.strokeStyle='#232e25'; c.lineWidth=1.5; c.strokeRect(wx,wy,ww,wh);
+      }
+      c.fillStyle='rgba(0,0,0,0.35)';
+      for(let y=0;y<=rows;y++) c.fillRect(0,y*rh-1.5,128,3);
+    }));
+  }
+  TEX.roof=canvasTex(64,64,c=>{
+    c.fillStyle='#111712'; c.fillRect(0,0,64,64);
+    for(let i=0;i<70;i++){ c.fillStyle='rgba(255,255,255,'+(Math.random()*0.04)+')'; c.fillRect(Math.random()*64,Math.random()*64,3,3); }
+    c.strokeStyle='rgba(0,0,0,.5)'; c.strokeRect(6,6,52,52);
+  });
+  // mech hull plating — grayscale detail, multiplied by each body color
+  TEX.hull=canvasTex(64,64,c=>{
+    c.fillStyle='#d4d4d4'; c.fillRect(0,0,64,64);
+    c.strokeStyle='#8f8f8f'; c.lineWidth=2;
+    c.strokeRect(3,3,58,58);
+    c.beginPath(); c.moveTo(32,3); c.lineTo(32,61); c.moveTo(3,40); c.lineTo(61,40); c.stroke();
+    c.fillStyle='#777';
+    for(const p of [[8,8],[56,8],[8,56],[56,56],[32,40]]){ c.beginPath(); c.arc(p[0],p[1],2,0,7); c.fill(); }
+    for(let i=0;i<40;i++){ c.fillStyle='rgba(0,0,0,'+(Math.random()*0.12)+')'; c.fillRect(Math.random()*64,Math.random()*64,Math.random()*6,1); }
+  });
+  // ground plates
+  TEX.ground=canvasTex(128,128,c=>{
+    c.fillStyle='#18271c'; c.fillRect(0,0,128,128);
+    for(let i=0;i<400;i++){ c.fillStyle='rgba(255,255,255,'+(Math.random()*0.025)+')'; c.fillRect(Math.random()*128,Math.random()*128,2,2); }
+    c.strokeStyle='rgba(0,0,0,0.4)'; c.lineWidth=2; c.strokeRect(0,0,128,128);
+    c.strokeStyle='rgba(0,0,0,0.2)'; c.strokeRect(64,0,64,64); c.strokeRect(0,64,64,64);
+  });
+}
+
 function initThree(){
   const cv = $('#scene');
   renderer = new THREE.WebGLRenderer({canvas:cv, antialias:true, powerPreference:'high-performance'});
@@ -733,9 +788,11 @@ function initThree(){
   const hemi = new THREE.HemisphereLight(0x9fc6ff, 0x20301c, 0.75); scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff0d0, 0.9); sun.position.set(-300,500,200); scene.add(sun);
 
+  initTextures();
   // ground
+  const gtex=TEX.ground; gtex.repeat.set(26,26);
   const groundGeo = new THREE.PlaneGeometry(ARENA*2.4, ARENA*2.4, 1,1);
-  const groundMat = new THREE.MeshStandardMaterial({color:0x16241a, roughness:1, metalness:0});
+  const groundMat = new THREE.MeshStandardMaterial({color:0x8fa394, map:gtex, roughness:1, metalness:0});
   const ground = new THREE.Mesh(groundGeo, groundMat); ground.rotation.x=-Math.PI/2; scene.add(ground);
 
   // grid
@@ -759,43 +816,52 @@ function buildArena(){
   // boundary wall ring (visual)
   const wallMat = new THREE.MeshStandardMaterial({color:0x24130f, roughness:.9, emissive:0x3a0a06, emissiveIntensity:.15});
   const ringGeo = new THREE.RingGeometry(ARENA*1.55, ARENA*1.7, 64);
-  // scatter buildings
-  const bmat = new THREE.MeshStandardMaterial({color:0x202a22, roughness:.85, metalness:.1});
+  // scatter buildings — textured facades (windows) + plain roof
   const count = 16;
   for(let i=0;i<count;i++){
     const w = 30+Math.random()*60, d=30+Math.random()*60, h=30+Math.random()*120;
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), bmat.clone());
+    const facade = TEX.bld[i%TEX.bld.length].clone(); facade.needsUpdate=true;
+    facade.repeat.set(Math.max(1,Math.round(w/34)), Math.max(1,Math.round(h/26)));
+    const side = new THREE.MeshStandardMaterial({map:facade, color:0xb6c2b8, roughness:.85, metalness:.08,
+      emissive:0x9fffc0, emissiveMap:facade, emissiveIntensity:0.22});
+    side.color.offsetHSL(0,0,(Math.random()-0.5)*0.08);
+    const roof = new THREE.MeshStandardMaterial({map:TEX.roof, color:0x9aa39c, roughness:.92, metalness:.05});
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), [side,side,roof,roof,side,side]);
     let x,z, tries=0;
     do{ x=(Math.random()*2-1)*ARENA*0.85; z=(Math.random()*2-1)*ARENA*0.85; tries++; }
     while(Math.hypot(x,z)<120 && tries<20);
     m.position.set(x,h/2,z);
-    m.material.color.offsetHSL(0,0,(Math.random()-0.5)*0.06);
     scene.add(m);
     const box = new THREE.Box3().setFromObject(m);
     obstacles.push({mesh:m, box, hw:w/2+6, hd:d/2+6, x, z});
   }
 }
 
-/* ---------- mech model builder ---------- */
+/* ---------- mech model builder ----------
+   torso and legs are separate groups so the torso can twist toward its
+   target while the legs face the direction of travel (本家トルソツイスト) */
 function buildMech(color, scale){
   const g = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({color, roughness:.5, metalness:.45});
-  const dark = new THREE.MeshStandardMaterial({color:0x111813, roughness:.7, metalness:.3});
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(16,14,11), mat); torso.position.y=20; g.add(torso);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(7,6,7), dark); head.position.set(0,29,2); g.add(head);
+  const torsoG = new THREE.Group(), legsG = new THREE.Group();
+  g.add(torsoG); g.add(legsG);
+  const mat = new THREE.MeshStandardMaterial({color, roughness:.5, metalness:.45, map:TEX.hull||null});
+  const dark = new THREE.MeshStandardMaterial({color:0x111813, roughness:.7, metalness:.3, map:TEX.hull||null});
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(16,14,11), mat); torso.position.y=20; torsoG.add(torso);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(7,6,7), dark); head.position.set(0,29,2); torsoG.add(head);
   const eye = new THREE.Mesh(new THREE.BoxGeometry(5,1.6,0.6), new THREE.MeshStandardMaterial({color:0x9af, emissive:0x3aa0ff, emissiveIntensity:1.4}));
-  eye.position.set(0,29.6,5.6); g.add(eye);
+  eye.position.set(0,29.6,5.6); torsoG.add(eye);
   // arms / weapon pods
   for(const s of [-1,1]){
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(5,12,5), mat); arm.position.set(s*12,20,0); g.add(arm);
-    const pod = new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.4,9,8), dark); pod.rotation.x=Math.PI/2; pod.position.set(s*12,21,6); g.add(pod);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(5,12,5), mat); arm.position.set(s*12,20,0); torsoG.add(arm);
+    const pod = new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.4,9,8), dark); pod.rotation.x=Math.PI/2; pod.position.set(s*12,21,6); torsoG.add(pod);
   }
   // legs
   for(const s of [-1,1]){
-    const hip = new THREE.Mesh(new THREE.BoxGeometry(6,11,6), mat); hip.position.set(s*5,9,0); g.add(hip);
-    const foot = new THREE.Mesh(new THREE.BoxGeometry(8,3,12), dark); foot.position.set(s*5,1.6,1); g.add(foot);
+    const hip = new THREE.Mesh(new THREE.BoxGeometry(6,11,6), mat); hip.position.set(s*5,9,0); legsG.add(hip);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(8,3,12), dark); foot.position.set(s*5,1.6,1); legsG.add(foot);
   }
   g.scale.setScalar(scale||1);
+  g.userData.torsoG=torsoG; g.userData.legsG=legsG;
   return g;
 }
 
@@ -818,6 +884,7 @@ const player = {
 let enemies=[];        // {grp, def, pos, hp, maxhp, fireCd, vel, alive}
 let projectiles=[];    // {mesh, vel, dmg, range, traveled, owner, splash, homing, target, color}
 let beams=[];          // transient hitscan beams {a,b,life,color}
+let laserSide=1;       // alternate left/right arm muzzle for beam visuals
 let mission=null, waveIdx=0, target=null, missionStartArmor=0, killsThisMission=0, dmgThisMission=0;
 const keys={};
 let invuln=0;
@@ -947,12 +1014,18 @@ function fireWeapon(w, origin, dir){
   const muzzle = origin.clone().add(dir.clone().multiplyScalar(4)); muzzle.y -= 1.2;
   const heavy = d.dmg>=24;
   if(d.type==='energy' && d.proj===0){
-    // hitscan beam
+    // hitscan beam — start from an arm-mounted muzzle (offset from the eye),
+    // otherwise the beam is viewed end-on and reads as a dot, not a line
     Audio.laser();
-    fxFlash(muzzle, d.color, heavy?4:2.6);
+    laserSide*=-1;
+    const up=new THREE.Vector3(0,1,0);
+    const right=new THREE.Vector3().crossVectors(dir,up).normalize();
+    const a=origin.clone().add(dir.clone().multiplyScalar(7))
+      .addScaledVector(right, laserSide*3.4).addScaledVector(up,-2.8);
+    fxFlash(a, d.color, heavy?4:2.6);
     const hit = raycastEnemies(origin, dir, d.range);
     const end = origin.clone().add(dir.clone().multiplyScalar(hit?hit.dist:d.range));
-    beams.push({a:origin.clone(), b:end, life:0.10, color:d.color, w: heavy?4.5:2.6});
+    beams.push({a, b:end, life:0.16, color:d.color, w: heavy?5:3});
     if(hit){ damageEnemy(hit.enemy, d.dmg); fxSpark(end, d.color); fxFlash(end, d.color, 4); }
     addShake(heavy?0.28:0.1);
   } else if(d.type==='missile'){
@@ -1222,6 +1295,7 @@ function update(dt){
     if(distP < band) mv.multiplyScalar(-1);            // back off
     else if(distP < band*1.15) mv.set(-toP.z,0,toP.x); // strafe
     // move — with wall-sliding and escape so enemies never get stuck in/against buildings
+    const prevX=e.pos.x, prevZ=e.pos.z;
     const step = mv.multiplyScalar(f.speed*dt);
     const nx = clamp(e.pos.x+step.x,-ARENA,ARENA);
     const nz = clamp(e.pos.z+step.z,-ARENA,ARENA);
@@ -1242,7 +1316,15 @@ function update(dt){
     }
     e.pos.x=clamp(e.pos.x,-ARENA,ARENA); e.pos.z=clamp(e.pos.z,-ARENA,ARENA);
     e.grp.position.copy(e.pos);
-    e.grp.rotation.y = Math.atan2(player.pos.x-e.pos.x, player.pos.z-e.pos.z);
+    // torso tracks the player; legs face the direction of actual travel
+    const aimYaw = Math.atan2(player.pos.x-e.pos.x, player.pos.z-e.pos.z);
+    const mdx=e.pos.x-prevX, mdz=e.pos.z-prevZ;
+    if(e.legYaw===undefined) e.legYaw=aimYaw;
+    const wantLeg = Math.hypot(mdx,mdz)>0.05 ? Math.atan2(mdx,mdz) : aimYaw;
+    e.legYaw = lerpAngle(e.legYaw, wantLeg, Math.min(1, dt*6));
+    const ud=e.grp.userData;
+    if(ud && ud.torsoG){ ud.torsoG.rotation.y=aimYaw; ud.legsG.rotation.y=e.legYaw; }
+    else e.grp.rotation.y=aimYaw;
     // fire
     e.fireCd -= dt;
     if(e.fireCd<=0 && distP < f.range){
@@ -1382,7 +1464,7 @@ function drawOverlay(){
   // beams — glow + bright core
   for(const b of beams){
     const a=worldToScreen(b.a), e=worldToScreen(b.b);
-    if(a&&e){ const col='#'+b.color.toString(16).padStart(6,'0'); const fade=Math.min(1, b.life/0.10);
+    if(a&&e){ const col='#'+b.color.toString(16).padStart(6,'0'); const fade=Math.min(1, b.life/0.12);
       ctx.save(); ctx.lineCap='round';
       ctx.shadowColor=col; ctx.shadowBlur=14; ctx.strokeStyle=col; ctx.lineWidth=b.w||2.6; ctx.globalAlpha=0.9*fade;
       ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(e.x,e.y); ctx.stroke();
