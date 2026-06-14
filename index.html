@@ -2360,10 +2360,10 @@ function pickTarget(){
 function aimDesignate(){
   const dir=new THREE.Vector3(); camera.getWorldDirection(dir);
   const o=camera.position;
-  let best=null, bestDot=0.95;               // ~18° acquisition cone
+  let best=null, bestDot=0.93;               // ~21° acquisition cone
   for(const e of targetList()){
     const to=targetCenter(e).sub(o); const dist=to.length();
-    if(dist>1600) continue;
+    if(dist>2800) continue;                   // 戦域全域をカバー
     const dot=to.normalize().dot(dir);
     if(dot>bestDot){ bestDot=dot; best=e; }
   }
@@ -2374,8 +2374,12 @@ function aimDesignate(){
 // lock key (E) just force-grabs the designated contact or drops an established lock.
 function updateLock(dt){
   aimDesignate();
-  // crosshair priority: putting the reticle on a new contact starts acquiring it
-  if(designated && designated!==target){ target=designated; lockState=1; lockT=0; Audio.lockSeek(); }
+  // crosshair priority: a contact under the reticle begins (or continues) acquisition.
+  // 新しい敵に照準を移したとき、または現在の(ソフト)目標がまだ未捕捉のときに開始する
+  if(designated){
+    if(designated!==target){ target=designated; lockState=1; lockT=0; Audio.lockSeek(); }
+    else if(lockState===0){ lockState=1; lockT=0; Audio.lockSeek(); }
+  }
   if(lockState>0){
     if(!target || !target.alive){ lockState=0; }
     else if(lockState===1){
