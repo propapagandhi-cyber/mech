@@ -677,6 +677,15 @@ const FOES = {
           shape:'tank',      move:'bruiser',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5],   kind:'vehicle'},
   hover: {name:'ホバータンク',  structure:90,  speed:48, dmg:9,  fireCd:0.85,range:300, color:0x4ab0c8, scale:0.95, reward:11000,
           shape:'hover',     move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[1.0,2.0],kind:'vehicle'},
+  // ---- 新型機（氷衛星エウロパ戦域で初確認） ----
+  // カタパルト: 後背ポッドから誘導ロケットを斉射する砲撃機。射程は長いが装甲が薄く、
+  //            遮蔽物で斉射をやり過ごして接近すれば仕留められる。＝バランス調整した「ミサイル攻撃」敵。
+  missl: {name:'カタパルト',   structure:130, speed:20, dmg:6,  fireCd:1.4, range:470, color:0x9a7cff, scale:1.1,  reward:20000,
+          shape:'catapult',  move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[2.2,3.8],
+          missile:true, salvo:4, mdmg:6, mcd:3.6},
+  // シャドウキャット: 緑装甲の高機動偵察機。跳躍で間合いを詰めながら撹乱射撃を行う。
+  ranger:{name:'シャドウキャット',structure:120, speed:38, dmg:11, fireCd:1.0, range:340, color:0x7a9a52, scale:0.95, reward:17000,
+          shape:'shadowcat', move:'skirmish', jump:1.1, jumpCd:[3,6],    strafeCd:[1.0,2.0]},
 };
 
 /* ---------- DATA: destructible facilities (施設) ----------
@@ -756,6 +765,15 @@ const MISSIONS = [
      {msg:'内郭の防空を無力化',      at:'base', structures:['sam','sam','radar','antenna','turret'], foes:['heavy','heavy','wasp'], reinforce:['med','tank','hover']},
      {msg:'補給中枢を爆破',          at:'base', structures:['fuel','fuel','fuel','turret'], foes:['heavy','med','med'], reinforce:['heavy','wasp']},
      {msg:'総司令部を殲滅せよ',      at:'base', structures:['hq'], foes:['heavy','heavy','heavy','wasp','wasp'], reinforce:['heavy','heavy','med','tank']},
+   ]},
+  // ---- 新戦域: 氷衛星エウロパ（雰囲気一変・新型機投入） ----
+  {id:12, name:'氷衛星エウロパ — 凍土の防衛線突破', diff:'★★★★', reward:760000, planet:'ice',
+   briefing:'戦域は一変する。氷衛星エウロパ——薄い大気とマイナス百数十度の青白い氷原だ。敵はこの極地に二種の新型機を展開している。【新たな脅威】①「カタパルト」(紫装甲)——後背のロケットポッドから誘導ロケットの斉射を放つ砲撃機。射程は長く厄介だが装甲は薄い。斉射は緩やかにしか追尾しない——建物や氷丘を遮蔽に使い、横移動や跳躍でかわしながら接近して仕留めろ。②「シャドウキャット」(緑装甲)——高機動の偵察機。跳躍で間合いを詰めて撹乱射撃を仕掛けてくる。凍土の防衛線を突破し、レーダーと通信網を潰して敵拠点を制圧せよ。最深部ではカタパルトの増援に警戒すること。',
+   deploy:{x:0,z:760}, base:{x:0,z:-640},
+   stages:[
+     {msg:'凍土へ進攻 — 哨戒部隊',          at:'route', foes:['ranger','scout','missl']},
+     {msg:'防衛線を制圧 — 砲撃機に警戒',     at:'base', structures:['turret','radar','antenna'], foes:['ranger','missl'], reinforce:['ranger','hover']},
+     {msg:'拠点中枢を破壊 — カタパルト斉射に警戒', at:'base', structures:['fuel','hq'], foes:['missl','ranger','heavy'], reinforce:['missl','ranger']},
    ]},
 ];
 
@@ -1021,26 +1039,60 @@ function initTextures(){
   });
 }
 
+/* ---------- DATA: planets (戦域ごとの空気・地表パレット) ----------
+   Each mission can carry planet:'<key>'. applyPlanet() retints the sky, fog,
+   lights, terrain ramp and colony buildings so a contract on a new world feels
+   different at a glance. Default is Mars; new worlds add variety. */
+const PLANETS = {
+  mars: { name:'火星',
+    sky:0x2a160e, fog:0x3a2014, fogNear:600, fogFar:2600,
+    hemiSky:0xe8b079, hemiGround:0x3a1c10, hemiInt:0.85,
+    sunColor:0xffd8a0, sunInt:0.95,
+    terr:{sand:0x9c5733, ochre:0xb07444, rock:0x6e4636, pale:0xc7a784},
+    ground:0xa5613b, bld:0xb6a890, bldEmissive:0xffca92, bldEmInt:0.16 },
+  // 氷衛星エウロパ: 薄い大気・極寒の青白い氷原。火星の温色とは正反対の寒色で雰囲気を一変させる。
+  ice:  { name:'氷衛星エウロパ',
+    sky:0x0a1622, fog:0x16303f, fogNear:520, fogFar:2500,
+    hemiSky:0x9fd8ff, hemiGround:0x16323f, hemiInt:0.95,
+    sunColor:0xd2ecff, sunInt:0.82,
+    terr:{sand:0x6f88a0, ochre:0x90a9c2, rock:0x3a4e60, pale:0xe8f3fb},
+    ground:0x5a7388, bld:0x93a8ba, bldEmissive:0x8fd6ff, bldEmInt:0.22 },
+};
+let currentPlanet = PLANETS.mars;
+let hemiLight=null, sunLight=null, groundMesh=null;
+// retint scene + lights + ground for the active planet (terrain/buildings read currentPlanet)
+function applyPlanet(p){
+  currentPlanet = p || PLANETS.mars;
+  if(scene){
+    if(scene.background) scene.background.setHex(currentPlanet.sky); else scene.background=new THREE.Color(currentPlanet.sky);
+    scene.fog = new THREE.Fog(currentPlanet.fog, currentPlanet.fogNear, currentPlanet.fogFar);
+  }
+  if(hemiLight){ hemiLight.color.setHex(currentPlanet.hemiSky); hemiLight.groundColor.setHex(currentPlanet.hemiGround); hemiLight.intensity=currentPlanet.hemiInt; }
+  if(sunLight){ sunLight.color.setHex(currentPlanet.sunColor); sunLight.intensity=currentPlanet.sunInt; }
+  if(groundMesh) groundMesh.material.color.setHex(currentPlanet.ground);
+}
+
 function initThree(){
   const cv = $('#scene');
   renderer = new THREE.WebGLRenderer({canvas:cv, antialias:true, powerPreference:'high-performance'});
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
   scene = new THREE.Scene();
-  // dusty Martian sky — butterscotch haze fading to a rust horizon
+  // dusty Martian sky — butterscotch haze fading to a rust horizon (default world)
   scene.background = new THREE.Color(0x2a160e);
   scene.fog = new THREE.Fog(0x3a2014, 600, 2600);
 
   camera = new THREE.PerspectiveCamera(72, 1, 0.5, 4200);
 
-  const hemi = new THREE.HemisphereLight(0xe8b079, 0x3a1c10, 0.85); scene.add(hemi);   // pink sky / red ground bounce
-  const sun = new THREE.DirectionalLight(0xffd8a0, 0.95); sun.position.set(-300,500,200); scene.add(sun);
+  hemiLight = new THREE.HemisphereLight(0xe8b079, 0x3a1c10, 0.85); scene.add(hemiLight);   // pink sky / red ground bounce
+  sunLight = new THREE.DirectionalLight(0xffd8a0, 0.95); sunLight.position.set(-300,500,200); scene.add(sunLight);
 
   initTextures();
-  // ground (backdrop beneath the displaced terrain — Martian regolith tint)
+  // ground (backdrop beneath the displaced terrain — planet regolith tint)
   const gtex=TEX.ground; gtex.repeat.set(26,26);
   const groundGeo = new THREE.PlaneGeometry(ARENA*2.4, ARENA*2.4, 1,1);
   const groundMat = new THREE.MeshStandardMaterial({color:0xa5613b, map:gtex, roughness:1, metalness:0});
   const ground = new THREE.Mesh(groundGeo, groundMat); ground.rotation.x=-Math.PI/2; ground.position.y=-1.5; scene.add(ground);
+  groundMesh = ground;
 
   // grid — faint surveyor lines, dusty amber
   const grid = new THREE.GridHelper(ARENA*2.4, 60, 0x7a4a2e, 0x4a2a18);
@@ -1102,9 +1154,10 @@ function buildTerrainMesh(){
   geo.rotateX(-Math.PI/2);                              // lay flat in XZ; +y is up
   const pos=geo.attributes.position;
   const col=new Float32Array(pos.count*3);
-  // Martian palette: rusty regolith on the flats → darker basalt rock → pale dust peaks
-  const cSand=new THREE.Color(0x9c5733), cOchre=new THREE.Color(0xb07444),
-        cRock=new THREE.Color(0x6e4636), cPale=new THREE.Color(0xc7a784);
+  // planet palette: regolith on the flats → darker rock → pale peaks (火星=赤錆, 氷衛星=青白)
+  const T=currentPlanet.terr;
+  const cSand=new THREE.Color(T.sand), cOchre=new THREE.Color(T.ochre),
+        cRock=new THREE.Color(T.rock), cPale=new THREE.Color(T.pale);
   const tmp=new THREE.Color();
   for(let i=0;i<pos.count;i++){
     const x=pos.getX(i), z=pos.getZ(i);
@@ -1201,8 +1254,8 @@ function buildArena(clear, opt){
       const h=Math.max(24, maxH*(1-distC*0.62)*(0.5+Math.random()*0.6));
       const facade = TEX.bld[(gx+gz)%TEX.bld.length].clone(); facade.needsUpdate=true;
       facade.repeat.set(Math.max(1,Math.round(w/30)), Math.max(1,Math.round(h/26)));
-      const side = new THREE.MeshStandardMaterial({map:facade, color:0xb6a890, roughness:.9, metalness:.05,
-        emissive:0xffca92, emissiveMap:facade, emissiveIntensity:0.16});
+      const side = new THREE.MeshStandardMaterial({map:facade, color:currentPlanet.bld, roughness:.9, metalness:.05,
+        emissive:currentPlanet.bldEmissive, emissiveMap:facade, emissiveIntensity:currentPlanet.bldEmInt});
       side.color.offsetHSL((Math.random()-0.5)*0.03,0,(Math.random()-0.5)*0.1);
       const roof = new THREE.MeshStandardMaterial({map:TEX.roof, color:0xa89a84, roughness:.95, metalness:.04});
       const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), [side,side,roof,roof,side,side]);
@@ -1284,6 +1337,31 @@ function buildMech(def){
     B(15,8,16,mat,0,15,0);                                    // turret (torso)
     C(1.8,1.8,24,dark,0,15,15,torsoG,Math.PI/2);             // main gun
     B(6,3,5,dark,0,19,-3); EYE(19.4,2.8,4);                   // commander sight
+  } else if(shape==='catapult'){
+    // missile boat: squat torso flanked by two big box missile pods with red-tipped tubes
+    B(18,12,14,mat,0,19,0);
+    B(7,6,7,dark,0,26,3); EYE(26.4,5.6,5);
+    const podMat=new THREE.MeshStandardMaterial({color:0x2a2440, roughness:.6, metalness:.5});
+    const tipMat=new THREE.MeshStandardMaterial({color:0xff4a3a, emissive:0xb02018, emissiveIntensity:.6});
+    for(const s of [-1,1]){
+      B(9,12,12,podMat,s*14,22,1);                       // shoulder missile pod block
+      for(let r=0;r<3;r++) for(let c=0;c<2;c++)           // 6 launch tubes per pod, red tips
+        B(2.2,2.2,2,tipMat, s*14+(c-0.5)*4.2, 18+r*4, 8);
+    }
+    for(const s of [-1,1]){ B(6.5,12,6.5,mat,s*5,10,0,legsG); B(9,3,12,dark,s*5,1.8,1,legsG); }
+  } else if(shape==='shadowcat'){
+    // agile recon mech: lean torso, tall sensor antenna mast, small jump jets, reverse legs
+    B(13,11,10,mat,0,18,0);
+    B(6,5,6,dark,0,24,2); EYE(24.4,5.4,4);
+    C(0.7,0.7,16,dark,4,32,-2);                           // tall sensor antenna
+    B(2,2,2,new THREE.MeshStandardMaterial({color:0xff3a2f,emissive:0xff2a1f,emissiveIntensity:1.1}),4,40,-2);
+    for(const s of [-1,1]){ B(5,11,5,mat,s*10,18,0); C(2,2,8,dark,s*10,19,5,torsoG,Math.PI/2); }   // arm guns
+    for(const s of [-1,1]) C(2.4,1,6,jetMat,s*5,15,-6,torsoG,0.3);                                  // jump jets
+    for(const s of [-1,1]){
+      const th=B(4,9,4,mat,s*5,11,-1,legsG); th.rotation.x=0.4;
+      const sh=B(3.5,9,3.5,dark,s*5,4,2,legsG); sh.rotation.x=-0.5;
+      B(8,2.5,7,dark,s*5,0.8,4,legsG);
+    }
   } else if(shape==='hover'){
     // hovercraft: angular hull on a glowing air-cushion skirt, twin-barrel turret
     B(20,3,30,jetMat,0,4,0,legsG);                            // glowing skirt
@@ -1477,6 +1555,8 @@ function startMission(mi){
   const dep = mission.deploy || {x:0,z:0};
   const base = mission.base || null;
   player.pitch=0; player.vel.set(0,0,0);
+  // retint the world for this contract's planet before the terrain/colony are built
+  applyPlanet(PLANETS[mission.planet] || PLANETS.mars);
   // face the base (or map centre) on deploy
   player.yaw = base ? Math.atan2(-(base.x-dep.x), -(base.z-dep.z)) : 0;
   // rebuild terrain, keeping the deploy point, base, and the corridor between clear
@@ -1499,7 +1579,7 @@ function clearActors(){
   structures.forEach(s=>scene.remove(s.grp)); structures=[];
   projectiles.forEach(p=>scene.remove(p.mesh)); projectiles=[];
   beams=[]; target=null;
-  salvo=[]; shake=0; fxQueue=[];
+  salvo=[]; eSalvo=[]; shake=0; fxQueue=[];
   explosions.forEach(e=>scene.remove(e.mesh)); explosions=[];
   pfx.forEach(f=>scene.remove(f.mesh)); pfx=[];
 }
@@ -1959,7 +2039,34 @@ function mechDeath(e){
 /* ---------- screen shake + missile salvo (ripple fire) ---------- */
 let shake=0;
 function addShake(a){ shake=Math.min(2.4, shake+a); }
-let salvo=[];   // pending staggered missile launches
+let salvo=[];   // pending staggered missile launches (player)
+let eSalvo=[];  // pending staggered missile launches (enemy missile boats)
+// Enemy missile boat fires a staggered rocket salvo at the player. Balanced as a
+// dodgeable threat: modest per-rocket damage, only mild homing, blockable by cover.
+function enemyMissileFire(e, wmul){
+  const f=e.def;
+  const from=e.pos.clone(); from.y=(e.pos.y||0)+22*(f.scale||1);
+  const to=player.pos.clone(); to.y=player.eye;
+  if(blockedByObstacle(from,to)) return;
+  const baseDir=to.clone().sub(from).normalize();
+  const n=Math.max(1, Math.round((f.salvo||4)*(0.5+0.5*(wmul==null?1:wmul))));
+  for(let k=0;k<n;k++) eSalvo.push({e, origin:from.clone(), dir:baseDir.clone(), delay:k*0.12, dmg:f.mdmg||6});
+  Audio.missile();                         // launch klaxon telegraphs the incoming salvo
+}
+function launchEnemyMissile(s){
+  const e=s.e; if(!e || !e.alive) return;
+  const v=s.dir.clone();
+  v.x+=(Math.random()-0.5)*0.10; v.y+=(Math.random()-0.5)*0.08+0.10; v.z+=(Math.random()-0.5)*0.10; v.normalize();
+  const speed=150;
+  const mesh=new THREE.Mesh(GEO_FX, new THREE.MeshBasicMaterial({color:0xff5a6a}));
+  mesh.scale.setScalar(1.3);
+  const start=s.origin.clone(); start.x+=(Math.random()-0.5)*4; start.z+=(Math.random()-0.5)*4;
+  mesh.position.copy(start); scene.add(mesh);
+  projectiles.push({mesh, vel:v.multiplyScalar(speed), dmg:s.dmg, range:760, traveled:0, owner:'enemy', speed,
+    splash:0, proxR:13, color:0xff5a6a, trail:true, trailT:0,
+    homing:{alive:true, pos:player.pos}, steerMul:0.4});
+  fxFlash(start, 0xffd27a, 3);
+}
 function launchMissile(s){
   const d=s.d;
   const v=s.dir.clone();
@@ -2214,7 +2321,8 @@ function update(dt){
     e.fireCd -= dt;
     const wmul=enemyWeaponMul(e);
     if(e.fireCd<=0 && distP < f.range && wmul>0){
-      enemyFire(e, wmul); e.fireCd = f.fireCd*(0.8+Math.random()*0.6);
+      if(f.missile){ enemyMissileFire(e, wmul); e.fireCd = (f.mcd||3.5)*(0.85+Math.random()*0.4); }
+      else { enemyFire(e, wmul); e.fireCd = f.fireCd*(0.8+Math.random()*0.6); }
     }
   }
 
@@ -2238,6 +2346,7 @@ function update(dt){
 
   // ---- missile salvo (ripple fire) — game-time countdown so pause doesn't burst-fire ----
   for(let i=salvo.length-1;i>=0;i--){ const s=salvo[i]; s.delay-=dt; if(s.delay<=0){ launchMissile(s); salvo.splice(i,1); } }
+  for(let i=eSalvo.length-1;i>=0;i--){ const s=eSalvo[i]; s.delay-=dt; if(s.delay<=0){ launchEnemyMissile(s); eSalvo.splice(i,1); } }
 
   // ---- projectiles ----
   for(let i=projectiles.length-1;i>=0;i--){
@@ -2249,7 +2358,8 @@ function update(dt){
       const toT=tc.sub(p.mesh.position); const dist=toT.length();
       const want=toT.normalize();
       // turn harder as it closes so it can still catch a strafing target
-      const steer=clamp(0.12 + 36/Math.max(dist,1), 0.12, 0.55);
+      // steerMul<1 keeps enemy rockets dodgeable (mild guidance) vs the player's sharp LRMs
+      const steer=clamp(0.12 + 36/Math.max(dist,1), 0.12, 0.55) * (p.steerMul||1);
       p.vel.normalize().lerp(want, steer).setLength(sp);
     }
     const stepv=p.vel.clone().multiplyScalar(dt);
@@ -2284,7 +2394,7 @@ function update(dt){
         }
       } else {
         const c=player.pos.clone(); c.y=player.eye;
-        if(p.mesh.position.distanceTo(c) < 11){ hurtPlayer(p.dmg, playerHitLoc(p.mesh.position)); fxSpark(p.mesh.position, p.color); dead=true; }
+        if(p.mesh.position.distanceTo(c) < (p.proxR||11)){ hurtPlayer(p.dmg, playerHitLoc(p.mesh.position)); fxSpark(p.mesh.position, p.color); dead=true; }
       }
     }
     if(dead){
@@ -2693,6 +2803,7 @@ function renderMissions(){
     if(t.structs) tags.push('破壊目標 '+t.structs);
     if(t.ambush)  tags.push('待ち伏せ');
     if(m.base)    tags.push('基地強襲');
+    if(m.planet && PLANETS[m.planet] && m.planet!=='mars') tags.push('戦域: '+PLANETS[m.planet].name);
     const row=document.createElement('div'); row.className='mrow';
     row.innerHTML=`<div class="mi"><div class="t">${m.name}</div>
       <div class="d">${tags.join(' · ')} · 報酬 ${fmt(m.reward)} C-bills + サルベージ</div></div>
@@ -2710,6 +2821,7 @@ function openBrief(mi){
   $('#brDesc').textContent = m.briefing ||
     '作戦区域で敵部隊を確認。全段階の敵を撃破せよ。掃討確認後に味方が回収に向かう。';
   let waves='作戦規模: <b>'+t.stages+' 段階</b> / 敵総数 '+t.foes+' 機';
+  if(m.planet && PLANETS[m.planet] && m.planet!=='mars') waves+='<br><span style="color:var(--cyan)">◎ 戦域: <b>'+PLANETS[m.planet].name+'</b> — これまでとは異なる惑星環境</span>';
   if(m.base) waves+='<br><span style="color:var(--cyan)">◎ 基地強襲 — 外縁に降着し、敵基地まで進攻して制圧せよ（広域マップ）</span>';
   if(t.structs){
     const names=Object.keys(t.structTypes).map(k=>STRUCTS[k].name+'×'+t.structTypes[k]).join('・');
