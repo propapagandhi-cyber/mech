@@ -1543,6 +1543,7 @@ const LOCK_TIME=0.45;
 let structKills=0, stageReinforced=false, stageEnding=false;
 const keys={};
 let invuln=0;
+let dmgDir=0, dmgDirT=0;          // 被弾方向インジケーター: 攻撃を受けた方位(world)と残存表示時間
 // ---- 僚機への戦術コマンド ----
 //   free=各個撃破（最寄り） / focus=集中攻撃（プレイヤーの目標） / guard=護衛（追従・近接のみ交戦） / fallback=退避（後退・射撃停止）
 const LANCE_ORDERS=['free','focus','guard','fallback'];
@@ -2119,11 +2120,12 @@ function structDeath(s){
     p.x+=(Math.random()-0.5)*10; p.z+=(Math.random()-0.5)*10; fxPuff(p, 0x2a2d30, 9, 2); });
   spawnWreck(s.pos, s.def.color, 1.7);
   if(s.def.chain){
-    // fuel depot: massive blast catches nearby actors
+    // fuel depot: massive blast catches nearby actors (foes, facilities, wingmen, the player)
     Audio.explode();
     for(const e of enemies){ if(e.alive && e.pos.distanceTo(s.pos)<75) damageEnemy(e, 45); }
+    for(const a of allies){ if(a.alive && a.pos.distanceTo(s.pos)<75) damageAlly(a, 45); }
     for(const o of structures){ if(o!==s && o.alive && o.pos.distanceTo(s.pos)<75) damageStruct(o, 70); }
-    const pd=player.pos.distanceTo(s.pos); if(pd<70) hurtPlayer(Math.round((1-pd/70)*40));
+    const pd=player.pos.distanceTo(s.pos); if(pd<70) hurtPlayer(Math.round((1-pd/70)*40), null, s.pos);
   }
 }
 // 作戦要素: レーダー基地が生きている間は敵の防空（タレット/SAM）が正確。
@@ -2325,9 +2327,10 @@ function enemyFire(e, wmul, tgt){
   projectiles.push({mesh, vel:dir.multiplyScalar(220), dmg, range:e.def.range+120, traveled:0, owner:'enemy', splash:0, color:e.def.color});
   Audio.cannon();
 }
-function hurtPlayer(dmg, locId){
+function hurtPlayer(dmg, locId, srcPos){
   if(invuln>0) return;
   dmgThisMission += dmg; SAVE.stats.damage += dmg;
+  if(srcPos){ dmgDir=Math.atan2(srcPos.x-player.pos.x, srcPos.z-player.pos.z); dmgDirT=1.3; }  // 被弾方向インジケーター
   damageFlash(); Audio.hit();
   if(player.loc){
     if(!locId) locId = randLoc(player.loc);
@@ -2632,7 +2635,7 @@ function update(dt){
           if(p.mesh.position.distanceTo(ca) < Math.max(p.proxR||11, 12*a.def.scale)){ damageAlly(a, p.dmg); fxSpark(p.mesh.position, p.color); dead=true; break; }
         }
         if(!dead){ const c=player.pos.clone(); c.y=player.eye;
-          if(p.mesh.position.distanceTo(c) < (p.proxR||11)){ hurtPlayer(p.dmg, playerHitLoc(p.mesh.position)); fxSpark(p.mesh.position, p.color); dead=true; } }
+          if(p.mesh.position.distanceTo(c) < (p.proxR||11)){ hurtPlayer(p.dmg, playerHitLoc(p.mesh.position), p.mesh.position); fxSpark(p.mesh.position, p.color); dead=true; } }
       }
     }
     if(dead){
@@ -2677,6 +2680,7 @@ function update(dt){
     if(k>=1){ scene.remove(f.mesh); f.mesh.material.dispose(); pfx.splice(i,1); } }
 
   if(invuln>0) invuln-=dt;
+  if(dmgDirT>0) dmgDirT-=dt;
   if(player.lastHitT>0){ player.lastHitT-=dt; if(player.lastHitT<=0) player.lastHit=null; }
 
   updateHUD();
@@ -2936,6 +2940,19 @@ function drawOverlay(){
       drawEdgeArrow(ctx, c, isT?'#37d6ff':'#ffb000');
     }
   }
+  // off-screen threat arrows — point to the nearest foes you can't currently see
+  {
+    const threats=[];
+    for(const e of enemies){ if(!e.alive) continue;
+      const d=player.pos.distanceTo(e.pos); if(d>780) continue;
+      const c=e.pos.clone(); c.y=(e.pos.y||0)+20*e.def.scale;
+      const s=worldToScreen(c);
+      if(s && s.x>=24 && s.x<=w-24 && s.y>=24 && s.y<=h-24) continue;   // already visible
+      threats.push({e,c,d});
+    }
+    threats.sort((a,b)=>a.d-b.d);
+    for(const o of threats.slice(0,4)) drawEdgeArrow(ctx, o.c, o.e===target?'#37d6ff':'rgba(255,90,80,.7)');
+  }
   // crosshair
   const cx=w/2, cy=h/2;
   const inRange = target && target.alive && player.pos.distanceTo(target.pos) < 600;
@@ -2947,6 +2964,52 @@ function drawOverlay(){
   ctx.moveTo(cx,cy-26);ctx.lineTo(cx,cy-8); ctx.moveTo(cx,cy+8);ctx.lineTo(cx,cy+26);
   ctx.stroke();
   ctx.fillStyle=inRange?'#3dff7a':'#2f6b46'; ctx.fillRect(cx-1.5,cy-1.5,3,3);
+
+  // ---- directional damage indicator: a red chevron from the edge toward incoming fire ----
+  if(dmgDirT>0){
+    const k=clamp(dmgDirT/1.3,0,1);
+    const rel=Math.atan2(Math.sin(dmgDir-player.yaw), -Math.cos(dmgDir-player.yaw));   // 0=ahead, +=right
+    const Rx=Math.min(w*0.40, 360), Ry=Math.min(h*0.40, 270);
+    const px=cx+Math.sin(rel)*Rx, py=cy-Math.cos(rel)*Ry;
+    ctx.save(); ctx.translate(px,py); ctx.rotate(Math.atan2(cy-py, cx-px));   // point inward, toward center
+    ctx.fillStyle='rgba(255,58,47,'+(0.9*k)+')'; ctx.shadowColor='rgba(255,58,47,.8)'; ctx.shadowBlur=10;
+    ctx.beginPath(); ctx.moveTo(16,0); ctx.lineTo(-12,12); ctx.lineTo(-4,0); ctx.lineTo(-12,-12); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  // ---- heading compass strip (top center) ----
+  drawCompass(ctx, w);
+}
+// classic heading tape: cardinal points + objective / enemy-base bearings, locked to player.yaw
+function drawCompass(ctx, w){
+  const cx=w/2, y=30, halfW=Math.min(300, w*0.34), HFOV=1.15;   // ~66° each side
+  const place=(beta)=>{ const rel=Math.atan2(Math.sin(beta-player.yaw), -Math.cos(beta-player.yaw));
+    return Math.abs(rel)<=HFOV ? cx+(rel/HFOV)*halfW : null; };
+  ctx.save();
+  ctx.textAlign='center';
+  ctx.strokeStyle='rgba(61,255,122,.22)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(cx-halfW,y); ctx.lineTo(cx+halfW,y); ctx.stroke();
+  // heading marker (center)
+  ctx.fillStyle='#3dff7a'; ctx.beginPath(); ctx.moveTo(cx,y-8); ctx.lineTo(cx-5,y-1); ctx.lineTo(cx+5,y-1); ctx.closePath(); ctx.fill();
+  // cardinals + intercardinals
+  const card=[['北',0,-1],['東',1,0],['南',0,1],['西',-1,0],['北東',0.7,-0.7],['南東',0.7,0.7],['南西',-0.7,0.7],['北西',-0.7,-0.7]];
+  ctx.font='10px Orbitron, monospace';
+  for(const [lab,dx,dz] of card){ const x=place(Math.atan2(dx,dz)); if(x==null) continue;
+    const major=lab.length===1;
+    ctx.strokeStyle = major?'rgba(61,255,122,.55)':'rgba(61,255,122,.3)';
+    ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x,y+(major?8:5)); ctx.stroke();
+    ctx.fillStyle = major?'#bfeccb':'rgba(150,190,165,.65)';
+    ctx.fillText(lab, x, y+19);
+  }
+  // objective + enemy-base bearings above the tape
+  for(const st of structures){ if(!st.alive || !st.isObjective) continue;
+    const x=place(Math.atan2(st.pos.x-player.pos.x, st.pos.z-player.pos.z)); if(x==null) continue;
+    ctx.fillStyle = st===target?'#37d6ff':'#ffb000'; ctx.fillText('◈', x, y-5);
+  }
+  if(mission && mission.base){ const dx=mission.base.x-player.pos.x, dz=mission.base.z-player.pos.z;
+    if(Math.hypot(dx,dz)>150){ const x=place(Math.atan2(dx,dz)); if(x!=null){ ctx.fillStyle='#37d6ff'; ctx.fillText('▲基地', x, y-5); } }
+  }
+  ctx.restore();
 }
 function worldToScreen(v){
   const p=v.clone().project(camera);
