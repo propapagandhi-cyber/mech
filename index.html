@@ -3249,9 +3249,10 @@ function pollMenuNav(btn, ax, now){
     }
     gpNavDir=dir; gpNavNextAt=now+(first?330:130);
   }
-  // A (1) activates · B (0) goes back · Plus (9) is a quick resume while paused
-  gpFresh(btn,'mOk',1,()=>{ if(gpMenuEl && gpMenuEl.tagName!=='INPUT') gpMenuEl.click(); });
-  gpFresh(btn,'mBack',0,()=>{
+  // A activates · B goes back · Plus (9) is a quick resume while paused.
+  // Switch Pro pads report physical A at index 0 and physical B at index 1.
+  gpFresh(btn,'mOk',0,()=>{ if(gpMenuEl && gpMenuEl.tagName!=='INPUT') gpMenuEl.click(); });
+  gpFresh(btn,'mBack',1,()=>{
     if(STATE.mode==='paused'){ resumeGame(); return; }
     const b=gpBackButton(list); if(b) b.click();
   });
