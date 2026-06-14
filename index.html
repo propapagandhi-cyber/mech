@@ -523,6 +523,12 @@ const WEAPONS = {
   gauss: {id:'gauss', name:'ガウスライフル',          type:'ballistic', dmg:42, heat:2,  cd:2.3,  range:680, ton:8,  cost:255000, ammo:40, proj:460, color:0xd6f2ff, splash:6},
   hvy:   {id:'hvy',   name:'重迫撃砲（施設破砕）',      type:'ballistic', dmg:36, heat:6,  cd:2.0,  range:420, ton:7,  cost:185000, ammo:40, proj:240, color:0xff8a3a, splash:18},
   plasma:{id:'plasma',name:'ヘヴィプラズマ砲',     type:'ballistic', dmg:46, heat:21, cd:1.9,  range:500, ton:9,  cost:340000, ammo:30, proj:300, color:0x46ffd2, splash:16, trail:true, fx:'plasma'},
+  // ---- 追加武装（作戦・基地強襲向け）----
+  mplas: {id:'mplas', name:'ミディアムパルスレーザー', type:'energy',    dmg:20, heat:10, cd:0.85, range:300, ton:3,  cost:62000,  ammo:0,  proj:0,   color:0xff5cff},
+  erlas: {id:'erlas', name:'ER ラージレーザー',   type:'energy',    dmg:30, heat:26, cd:1.7,  range:640, ton:5,  cost:148000, ammo:0,  proj:0,   color:0xff6a2a, splash:6},
+  uac5:  {id:'uac5',  name:'ウルトラ AC/5',     type:'ballistic', dmg:13, heat:3,  cd:0.5,  range:540, ton:5,  cost:96000,  ammo:120,proj:360, color:0xffd66a, count:2},
+  lrm20: {id:'lrm20', name:'LRM‑20（長距離ミサイル）',  type:'missile',   dmg:5,  heat:9,  cd:2.2,  range:660, ton:9,  cost:236000, ammo:90, proj:135, color:0x7a6cff, count:20, splash:5, homing:true},
+  arrow: {id:'arrow', name:'アローIV（戦術ミサイル）', type:'missile',   dmg:30, heat:10, cd:3.2,  range:840, ton:9,  cost:285000, ammo:15, proj:150, color:0xff9a3a, count:1,  splash:34, homing:true, proxR:30},
 };
 
 /* ---------- DATA: chassis ---------- */
@@ -566,6 +572,7 @@ const STRUCTS = {
   radar:   {name:'レーダー基地', hp:140, hitR:20, aimY:16, height:34, color:0xc9d2dd},
   fuel:    {name:'燃料デポ',     hp:80,  hitR:22, aimY:12, height:26, color:0xd0a23a, chain:true},
   turret:  {name:'防衛タレット', hp:70,  hitR:12, aimY:9,  height:18, color:0x8a6a4a, fires:true, dmg:13, fireCd:1.5, range:380},
+  sam:     {name:'地対空ミサイル陣地', hp:120, hitR:16, aimY:14, height:30, color:0x6a7a8a, fires:true, dmg:22, fireCd:2.2, range:620},
   hq:      {name:'敵戦区司令部', hp:260, hitR:30, aimY:16, height:34, color:0x9aa3ad},
 };
 
@@ -614,6 +621,26 @@ const MISSIONS = [
      {msg:'峡谷を突破 — 待ち伏せ！', ambush:true, foes:['hover','hover','tank']},
      {msg:'要塞外縁を制圧',         at:'base', structures:['turret','turret','radar'], foes:['heavy','med']},
      {msg:'要塞中枢を殲滅',         at:'base', structures:['fuel','fuel','antenna','hq'], foes:['heavy','heavy','wasp'], reinforce:['med','tank']},
+   ]},
+  // ---- 高難度・作戦級ミッション（敵総司令部への大規模強襲） ----
+  {id:10, name:'要衝強襲 — 鉄槌作戦', diff:'★★★★★', reward:980000,
+   briefing:'敵の地域防空の要、地対空ミサイル(SAM)陣地に守られた要衝を強襲する。【作戦の要点】①長い進攻路には伏兵がいる——山岳地形を遮蔽に使え。山は登れる、稜線を取れば射界が開ける。②SAM陣地は射程が長く正面突破は損害が大きい。まずレーダー基地を潰せば敵の照準が乱れる。③燃料デポは大爆発を誘発する——隣接する敵設備や守備隊を巻き込んで一掃せよ。アローIVなどの長射程・範囲兵器が有効だ。④司令部を叩けば最後の親衛隊が出撃する。',
+   deploy:{x:-840,z:840}, base:{x:760,z:-740},
+   stages:[
+     {msg:'進攻路を突破 — 伏兵に警戒', at:'route', ambush:true, foes:['hover','hover','tank','scout']},
+     {msg:'前進拠点を制圧',           at:'route', structures:['turret','sam','antenna'], foes:['med','tank','grunt'], reinforce:['wasp','scout']},
+     {msg:'防空網を無力化（レーダー優先）', at:'base', structures:['radar','sam','sam','turret'], foes:['heavy','med','tank']},
+     {msg:'司令部を破壊せよ',          at:'base', structures:['fuel','fuel','hq'], foes:['heavy','heavy','med','wasp'], reinforce:['heavy','tank','wasp']},
+   ]},
+  {id:11, name:'最終決戦 — 敵総司令部殲滅', diff:'★★★★★★', reward:1450000,
+   briefing:'敵戦線の心臓部、総司令部への総攻撃。これが最終契約だ。【作戦の要点】広大な要塞地帯を外縁から攻略する。SAMとタレットが幾重にも防衛網を敷き、増援も濃密だ。山岳の稜線を遮蔽・高所として活用し、レーダーと燃料デポを優先的に破壊して敵の防衛を崩してから中枢へ突入せよ。最深部では総司令部を守る精鋭親衛隊が二波にわたって出撃する。長射程兵器と十分な装甲・冷却を整えて臨め。',
+   deploy:{x:0,z:980}, base:{x:0,z:-860},
+   stages:[
+     {msg:'外縁警戒線を突破 — 伏兵', at:'route', ambush:true, foes:['tank','tank','hover','scout','med']},
+     {msg:'第一防衛網を制圧',        at:'route', structures:['sam','turret','turret','radar'], foes:['heavy','med','tank']},
+     {msg:'内郭の防空を無力化',      at:'base', structures:['sam','sam','radar','antenna','turret'], foes:['heavy','heavy','wasp'], reinforce:['med','tank','hover']},
+     {msg:'補給中枢を爆破',          at:'base', structures:['fuel','fuel','fuel','turret'], foes:['heavy','med','med'], reinforce:['heavy','wasp']},
+     {msg:'総司令部を殲滅せよ',      at:'base', structures:['hq'], foes:['heavy','heavy','heavy','wasp','wasp'], reinforce:['heavy','heavy','med','tank']},
    ]},
 ];
 
@@ -912,10 +939,73 @@ function resize(){
   const ov=$('#overlay'); ov.width=w; ov.height=h;
 }
 
+/* ============================================================
+   TERRAIN — walkable height-field
+   Mountains are no longer solid cones: they are gentle, climbable rises in a
+   continuous height-field. terrainHeightAt(x,z) is the single source of truth
+   for ground elevation; the visible terrain mesh is displaced to match it so
+   what you see is exactly what you can walk on. Both the player and the AI
+   sample it every frame, so everyone can climb the slopes.
+   ============================================================ */
+let mountains=[];        // {x,z,r,h} for radar terrain shading (kept for the minimap)
+let terrainBumps=[];     // {x,z,r,h,k,phase,amp} smooth rises that make up the hills
+let terrainSeed=0;       // re-rolled each mission so the rolling base noise varies
+let terrainMesh=null;    // displaced ground mesh matching the height-field
+
+// cheap, deterministic rolling-ground noise in roughly [-1,1]
+function noiseT(x,z){
+  return Math.sin(x*0.0090+terrainSeed)*Math.cos(z*0.0110-terrainSeed*1.3)*0.55
+       + Math.sin((x*0.7+z)*0.0170+terrainSeed*2.1)*0.30
+       + Math.sin((x-z*0.6)*0.0265-terrainSeed*0.7)*0.15;
+}
+// Ground elevation at a world point. Gentle rolling base + smooth raised-cosine
+// hill domes with random angular ridges so slopes are uneven but always walkable.
+function terrainHeightAt(x,z){
+  let h = (noiseT(x,z)*0.5+0.5)*15;          // 0..15 rolling ground, never dips below 0
+  for(let i=0;i<terrainBumps.length;i++){
+    const b=terrainBumps[i];
+    const dx=x-b.x, dz=z-b.z;
+    const d=Math.sqrt(dx*dx+dz*dz);
+    if(d>=b.r) continue;
+    const t=d/b.r;
+    const dome=0.5*(1+Math.cos(Math.PI*t));            // 1 at peak → 0 at rim, smooth
+    const th=Math.atan2(dz,dx);
+    const ridge=1 + b.amp*Math.sin(b.k*th + b.phase)*(1-t); // ridges fade out toward the rim
+    h += b.h*dome*ridge;
+  }
+  return h;
+}
+// Build the visible terrain to match terrainHeightAt exactly (vertex-coloured by
+// elevation: grass → rock → snow). Disposes any previous mission's mesh.
+function buildTerrainMesh(){
+  if(terrainMesh){ scene.remove(terrainMesh); terrainMesh.geometry.dispose(); terrainMesh.material.dispose(); terrainMesh=null; }
+  const SIZE=ARENA*2.4, SEG=120;
+  const geo=new THREE.PlaneGeometry(SIZE,SIZE,SEG,SEG);
+  geo.rotateX(-Math.PI/2);                              // lay flat in XZ; +y is up
+  const pos=geo.attributes.position;
+  const col=new Float32Array(pos.count*3);
+  const cGrass=new THREE.Color(0x415e39), cDirt=new THREE.Color(0x5b6243),
+        cRock=new THREE.Color(0x6e7468),  cSnow=new THREE.Color(0xdfe9e2);
+  const tmp=new THREE.Color();
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i), z=pos.getZ(i);
+    const y=terrainHeightAt(x,z);
+    pos.setY(i,y);
+    // colour ramp by height
+    if(y<22)        tmp.copy(cGrass).lerp(cDirt, clamp(y/22,0,1));
+    else if(y<120)  tmp.copy(cDirt).lerp(cRock, clamp((y-22)/98,0,1));
+    else            tmp.copy(cRock).lerp(cSnow, clamp((y-120)/110,0,1));
+    col[i*3]=tmp.r; col[i*3+1]=tmp.g; col[i*3+2]=tmp.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col,3));
+  geo.computeVertexNormals();
+  const mat=new THREE.MeshStandardMaterial({vertexColors:true, roughness:1, metalness:0, flatShading:false});
+  terrainMesh=new THREE.Mesh(geo,mat); terrainMesh.position.y=0.05; scene.add(terrainMesh);
+}
+
 // Rebuild the battlefield. `clear` is a list of {x,z,r} keep-out zones
 // (player deploy, enemy base, the approach corridor) so nothing spawns on top
 // of them and the route to the base stays passable.
-let mountains=[];   // {x,z,r,h} for radar terrain shading
 function buildArena(clear){
   clear = clear || [{x:0,z:0,r:150}];
   const blocked=(x,z,pad)=>clear.some(c=>Math.hypot(x-c.x,z-c.z) < c.r+(pad||0));
@@ -933,25 +1023,26 @@ function buildArena(clear){
   });
   obstacles=[];
   mountains=[];
-  // ---- mountains (山岳地形): faceted rock cones that block movement + line of sight ----
-  const rockMat = new THREE.MeshStandardMaterial({map:TEX.rock, color:0x8b9486, roughness:1, metalness:0, flatShading:true});
-  const mCount = 16;
+  // ---- mountains (山岳地形): gentle, climbable rises in the height-field ----
+  // Wide radii vs. modest heights keep slopes shallow enough for mechs to walk
+  // up; per-hill angular ridges (k,phase,amp) make the relief uneven, not conical.
+  terrainBumps=[];
+  terrainSeed=Math.random()*1000;
+  const mCount = 14;
   for(let i=0;i<mCount;i++){
     let x,z,tries=0;
     do{ x=(Math.random()*2-1)*ARENA*0.92; z=(Math.random()*2-1)*ARENA*0.92; tries++; }
-    while((blocked(x,z,160) || Math.hypot(x,z)<ARENA*0.22) && tries<40);
+    while((blocked(x,z,200) || Math.hypot(x,z)<ARENA*0.18) && tries<40);
     if(tries>=40) continue;
-    const r = 120+Math.random()*180, h = 160+Math.random()*260;
-    const rt=TEX.rock.clone(); rt.needsUpdate=true; rt.repeat.set(3,3);
-    const mat=rockMat.clone(); mat.map=rt;
-    const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7+((Math.random()*3)|0), 1), mat);
-    m.position.set(x, h/2-4, z);
-    m.rotation.y = Math.random()*Math.PI;
-    scene.add(m);
-    // collide/occlude as a tall column a bit narrower than the visual base
-    obstacles.push({mesh:m, box:null, hw:r*0.72, hd:r*0.72, x, z, mtn:true, mh:h});
-    mountains.push({x,z,r:r*0.72,h});
+    const r = 380+Math.random()*260;            // broad footprint → gentle grade
+    const h = 90+Math.random()*150;             // modest height so the climb is fair
+    terrainBumps.push({x, z, r, h,
+      k: 3+((Math.random()*4)|0),               // 3–6 fold ridge pattern
+      phase: Math.random()*Math.PI*2,
+      amp: 0.12+Math.random()*0.16});           // ridge unevenness
+    mountains.push({x, z, r:r*0.55, h});        // radar footprint (visual core)
   }
+  buildTerrainMesh();
   // ---- buildings — textured facades (windows) + plain roof ----
   const count = 26;
   for(let i=0;i<count;i++){
@@ -967,10 +1058,13 @@ function buildArena(clear){
     do{ x=(Math.random()*2-1)*ARENA*0.88; z=(Math.random()*2-1)*ARENA*0.88; tries++; }
     while((blocked(x,z,40) || Math.hypot(x,z)<120) && tries<24);
     if(tries>=24) continue;
-    m.position.set(x,h/2,z);
+    // buildings sit on the terrain; lift them so the base isn't buried in a slope
+    const gy=terrainHeightAt(x,z);
+    m.position.set(x, gy+h/2, z);
     scene.add(m);
     const box = new THREE.Box3().setFromObject(m);
-    obstacles.push({mesh:m, box, hw:w/2+6, hd:d/2+6, x, z});
+    // `top` = walkable roof height; `base` = where the solid wall starts
+    obstacles.push({mesh:m, box, hw:w/2+6, hd:d/2+6, x, z, h, base:gy, top:gy+h});
   }
 }
 
@@ -1090,6 +1184,20 @@ function buildStructure(type){
     const bar=new THREE.Mesh(new THREE.CylinderGeometry(1.3,1.3,14,10),dark); bar.rotation.x=Math.PI/2; bar.position.set(0,1,8); tur.add(bar);
     const eye=new THREE.Mesh(new THREE.BoxGeometry(6,1.6,0.6),new THREE.MeshStandardMaterial({color:0xff9a6a,emissive:0xff5a2a,emissiveIntensity:1.3})); eye.position.set(0,2,5.4); tur.add(eye);
     g.userData.turret=tur;
+  } else if(type==='sam'){
+    // 地対空ミサイル陣地: 装甲ボックス上の旋回式ミサイルラック
+    B(20,6,20,dark,0,3,0);                            // armored emplacement
+    for(const s of [-1,1]) B(2,8,20,dark,s*9,7,0);    // blast walls
+    const tur=new THREE.Group(); tur.position.set(0,9,0); g.add(tur);
+    tur.add(new THREE.Mesh(new THREE.BoxGeometry(12,5,12),steel));
+    const rack=new THREE.MeshStandardMaterial({color:0x3a4450, roughness:.6, metalness:.5});
+    for(const s of [-1,1]) for(let r=0;r<3;r++){    // 6発のミサイル筒（仰角つき）
+      const tube=new THREE.Mesh(new THREE.CylinderGeometry(1.4,1.4,12,8),rack);
+      tube.rotation.x=-0.5; tube.position.set(s*3.4, 5, -3+r*3); tur.add(tube);
+    }
+    const eye=new THREE.Mesh(new THREE.BoxGeometry(7,1.6,0.6),new THREE.MeshStandardMaterial({color:0x9af,emissive:0x3aa0ff,emissiveIntensity:1.3})); eye.position.set(0,1.5,6.2); tur.add(eye);
+    g.userData.turret=tur;
+    g.userData.beacon=B(1.8,1.8,1.8,warn,0,20,0);
   } else { // hq — fortified command bunker
     B(46,18,30,steel,0,9,0);
     B(50,4,34,dark,0,18,0);                           // roof slab
@@ -1174,7 +1282,7 @@ function startMission(mi){
   // deploy point + enemy base — for assault missions you start at the perimeter
   const dep = mission.deploy || {x:0,z:0};
   const base = mission.base || null;
-  player.pos.set(dep.x,0,dep.z); player.pitch=0; player.vel.set(0,0,0);
+  player.pitch=0; player.vel.set(0,0,0);
   // face the base (or map centre) on deploy
   player.yaw = base ? Math.atan2(-(base.x-dep.x), -(base.z-dep.z)) : 0;
   // rebuild terrain, keeping the deploy point, base, and the corridor between clear
@@ -1184,6 +1292,8 @@ function startMission(mi){
     for(let t=0.3;t<1;t+=0.22) clear.push({x:dep.x+(base.x-dep.x)*t, z:dep.z+(base.z-dep.z)*t, r:170});
   } else clear.push({x:0,z:0,r:160});
   buildArena(clear);
+  // place the player on the (now-generated) terrain at the deploy point
+  player.pos.set(dep.x, terrainHeightAt(dep.x, dep.z), dep.z);
   clearActors();
   setMode('playing');
   bigMsg('契約: '+mission.name);
@@ -1205,7 +1315,7 @@ function spawnFoe(type, cx, cz, ang, dist){
   const grp=buildMech(f);
   const x=clamp(cx+Math.cos(ang)*dist, -ARENA+40, ARENA-40);
   const z=clamp(cz+Math.sin(ang)*dist, -ARENA+40, ARENA-40);
-  const pos=new THREE.Vector3(x,0,z);
+  const pos=new THREE.Vector3(x, terrainHeightAt(x,z), z);   // stand on the terrain
   grp.position.copy(pos);
   scene.add(grp);
   const rnd=r=>r[0]+Math.random()*(r[1]-r[0]);
@@ -1237,9 +1347,11 @@ function spawnStructure(type, cx, cz, ang, dist){
   const grp=buildStructure(type);
   const x=clamp(cx+Math.cos(ang)*dist, -ARENA+60, ARENA-60);
   const z=clamp(cz+Math.sin(ang)*dist, -ARENA+60, ARENA-60);
-  grp.position.set(x,0,z); scene.add(grp);
-  structures.push({grp, def, type, pos:new THREE.Vector3(x,0,z), hp:def.hp, maxhp:def.hp, alive:true,
-    isObjective:true, radius:def.hitR, aimY:def.aimY, height:def.height, fireCd:1.2+Math.random()*1.5});
+  const gy=terrainHeightAt(x,z);                              // sit the facility on the terrain
+  grp.position.set(x,gy,z); scene.add(grp);
+  // bake the ground height into the aim point so targeting/hit-tests hit the real position
+  structures.push({grp, def, type, pos:new THREE.Vector3(x,gy,z), hp:def.hp, maxhp:def.hp, alive:true,
+    isObjective:true, radius:def.hitR, aimY:gy+def.aimY, height:def.height, fireCd:1.2+Math.random()*1.5});
 }
 // where a stage's actors spawn: at the enemy base, along the approach, or near the player
 function stageCenter(st){
@@ -1426,18 +1538,13 @@ function raycastEnemies(origin, dir, range){
 }
 function blockedByObstacle(a,b){
   const dir=b.clone().sub(a); const len=dir.length(); dir.normalize();
-  for(const o of obstacles){
-    // simple slab test on XZ, treat building as tall
-    const half={x:o.hw, z:o.hd};
-    const rel0x=a.x-o.x, rel0z=a.z-o.z;
-    // step march (cheap)
-  }
-  // cheap march
-  const steps = Math.min(40, Math.ceil(len/14));
+  // cheap march — blocked by a building footprint OR by intervening terrain (a hill)
+  const steps = Math.min(48, Math.ceil(len/14));
   for(let i=1;i<steps;i++){
     const p = a.clone().add(dir.clone().multiplyScalar(len*i/steps));
+    if(p.y < terrainHeightAt(p.x,p.z)) return true;        // a ridge masks the line of fire
     for(const o of obstacles){
-      if(Math.abs(p.x-o.x)<o.hw && Math.abs(p.z-o.z)<o.hd && p.y< (o.mesh.geometry.parameters.height||80)) return true;
+      if(Math.abs(p.x-o.x)<o.hw && Math.abs(p.z-o.z)<o.hd && p.y < (o.top||80)) return true;
     }
   }
   return false;
@@ -1497,16 +1604,21 @@ function structDeath(s){
     const pd=player.pos.distanceTo(s.pos); if(pd<70) hurtPlayer(Math.round((1-pd/70)*40));
   }
 }
+// 作戦要素: レーダー基地が生きている間は敵の防空（タレット/SAM）が正確。
+// レーダーを潰すと照準が乱れ、有効射程も縮む。→「レーダーを先に叩く」が効く。
+function enemyRadarActive(){ return structures.some(s=>s.alive && s.type==='radar'); }
 // defensive turret fires at the player (owner:'enemy' so existing impact logic applies)
 function structFire(s){
   const from=s.pos.clone(); from.y=s.aimY+2;
   const to=player.pos.clone(); to.y=player.eye;
   if(blockedByObstacle(from,to)) return;
   const dir=to.clone().sub(from).normalize();
-  dir.x+=(Math.random()-0.5)*0.03; dir.z+=(Math.random()-0.5)*0.03; dir.normalize();
-  const mesh=new THREE.Mesh(new THREE.SphereGeometry(1.5,6,6), new THREE.MeshBasicMaterial({color:0xff8a4a}));
+  const spread = enemyRadarActive() ? 0.03 : 0.12;   // blind without radar
+  dir.x+=(Math.random()-0.5)*spread; dir.z+=(Math.random()-0.5)*spread; dir.normalize();
+  const col = s.type==='sam' ? 0x6ad0ff : 0xff8a4a;
+  const mesh=new THREE.Mesh(new THREE.SphereGeometry(1.5,6,6), new THREE.MeshBasicMaterial({color:col}));
   mesh.position.copy(from); scene.add(mesh);
-  projectiles.push({mesh, vel:dir.multiplyScalar(240), dmg:s.def.dmg, range:s.def.range+120, traveled:0, owner:'enemy', splash:0, color:0xff8a4a});
+  projectiles.push({mesh, vel:dir.multiplyScalar(s.type==='sam'?300:240), dmg:s.def.dmg, range:s.def.range+120, traveled:0, owner:'enemy', splash:0, color:col});
   Audio.cannon();
 }
 function flashMesh(grp){
@@ -1627,7 +1739,7 @@ function launchMissile(s){
   start.x+=(Math.random()-0.5)*3; start.y+=-1.4+(Math.random()-0.5)*2; start.z+=(Math.random()-0.5)*3;
   mesh.position.copy(start); scene.add(mesh);
   projectiles.push({mesh, vel:v, dmg:d.dmg, range:d.range, traveled:0, owner:'player', speed:d.proj,
-    splash:d.splash||0, homing:s.homing||null, proxR:18, color:d.color, trail:true, trailT:0});
+    splash:d.splash||0, splashR:d.splash?(d.proxR?d.proxR*1.6:40):0, homing:s.homing||null, proxR:d.proxR||18, color:d.color, trail:true, trailT:0});
   fxFlash(start, 0xffe2a0, 4);
   Audio.launch(); addShake(0.18);
 }
@@ -1708,17 +1820,24 @@ function update(dt){
   // integrate
   const next = player.pos.clone();
   next.x += player.vel.x*dt; next.z += player.vel.z*dt; next.y += player.vel.y*dt;
-  if(next.y<0){ next.y=0; player.vel.y=0; }
   // arena bounds
   next.x=clamp(next.x,-ARENA,ARENA); next.z=clamp(next.z,-ARENA,ARENA);
-  // obstacle push-out (player radius ~10)
+  // ground floor = terrain elevation, raised to a building roof when standing on one
+  let floor = terrainHeightAt(next.x, next.z);
   for(const o of obstacles){
-    if(Math.abs(next.x-o.x)<o.hw && Math.abs(next.z-o.z)<o.hd && next.y<(o.mesh.geometry.parameters.height||80)){
-      const dx=next.x-o.x, dz=next.z-o.z;
-      if(Math.abs(dx)/o.hw > Math.abs(dz)/o.hd){ next.x = o.x + Math.sign(dx)*o.hw; }
-      else { next.z = o.z + Math.sign(dz)*o.hd; }
+    if(Math.abs(next.x-o.x)<o.hw && Math.abs(next.z-o.z)<o.hd){
+      // already on/above the roof (or descending onto it) → walk on the roof
+      if(player.pos.y >= o.top-8 || next.y >= o.top-2){
+        floor = Math.max(floor, o.top);
+      } else {
+        // below the roof → solid wall, push out along the shallowest axis
+        const dx=next.x-o.x, dz=next.z-o.z;
+        if(Math.abs(dx)/o.hw > Math.abs(dz)/o.hd){ next.x = o.x + Math.sign(dx||1)*o.hw; }
+        else { next.z = o.z + Math.sign(dz||1)*o.hd; }
+      }
     }
   }
+  if(next.y <= floor){ next.y = floor; if(player.vel.y<0) player.vel.y=0; }
   player.pos.copy(next);
 
   // ---- camera (cockpit) ----
@@ -1795,16 +1914,17 @@ function update(dt){
 
     // ---- jump jets: only jet-capable foes leap, on a timer ----
     e.jumpCd -= dt;
-    const grounded = e.pos.y<=0.05;
+    const floorE = terrainHeightAt(e.pos.x, e.pos.z);     // climbable ground beneath the foe
+    const grounded = e.pos.y<=floorE+0.1;
     if((f.jump||0)>0 && grounded && e.jumpCd<=0 && distP < f.range*1.4){
       e.vy = 46*f.jump; e.jumping=true; e.jumpCd = rndR(f.jumpCd||[5,9]);
     }
     // vertical integration (floaty jet-style gravity / landing)
     if(!grounded || e.vy>0){
       e.vy -= 70*dt; e.pos.y += e.vy*dt;
-      if(e.pos.y<=0){ e.pos.y=0; e.vy=0; e.jumping=false; }
+      if(e.pos.y<=floorE){ e.pos.y=floorE; e.vy=0; e.jumping=false; }
     }
-    const airborne = e.pos.y>2;
+    const airborne = e.pos.y>floorE+2;
     // jet exhaust puffs under the feet while thrusting up
     if(e.vy>1){ e.jetT-=dt; if(e.jetT<=0){ e.jetT=0.05;
       const fp=e.pos.clone(); fp.y+=2; fxPuff(fp, 0xffd0a0, 2.4*(f.scale||1), 0.3); } }
@@ -1815,7 +1935,7 @@ function update(dt){
     const step = mv.multiplyScalar(f.speed*speedMul*dt);
     const nx = clamp(e.pos.x+step.x,-ARENA,ARENA);
     const nz = clamp(e.pos.z+step.z,-ARENA,ARENA);
-    const blocker = (x,z)=>{ for(const o of obstacles){ if(Math.abs(x-o.x)<o.hw && Math.abs(z-o.z)<o.hd && e.pos.y<(o.mesh.geometry.parameters.height||80)) return o; } return null; };
+    const blocker = (x,z)=>{ for(const o of obstacles){ if(Math.abs(x-o.x)<o.hw && Math.abs(z-o.z)<o.hd && e.pos.y<(o.top||80)-4) return o; } return null; };
     const cur = blocker(e.pos.x, e.pos.z);
     if(cur){
       // embedded in a building footprint — shove out along the shallowest axis so it can escape
@@ -1831,6 +1951,9 @@ function update(dt){
       e.pos.z=nz;                             // slide along X wall
     }
     e.pos.x=clamp(e.pos.x,-ARENA,ARENA); e.pos.z=clamp(e.pos.z,-ARENA,ARENA);
+    // settle onto the terrain after moving so the foe climbs slopes instead of clipping through
+    const fl2 = terrainHeightAt(e.pos.x, e.pos.z);
+    if(e.pos.y < fl2 || (grounded && !e.jumping)){ e.pos.y = fl2; if(e.vy<0) e.vy=0; }
     e.grp.position.copy(e.pos);
     // torso tracks the player; legs face the direction of actual travel
     const aimYaw = Math.atan2(player.pos.x-e.pos.x, player.pos.z-e.pos.z);
@@ -1862,7 +1985,9 @@ function update(dt){
     if(ud.turret) ud.turret.rotation.y = Math.atan2(dx,dz);
     if(s.def.fires){
       s.fireCd -= dt;
-      if(s.fireCd<=0 && distS < s.def.range){ structFire(s); s.fireCd = s.def.fireCd*(0.8+Math.random()*0.5); }
+      // without an active radar the defensive net's effective range shrinks
+      const effRange = s.def.range * (enemyRadarActive()?1:0.62);
+      if(s.fireCd<=0 && distS < effRange){ structFire(s); s.fireCd = s.def.fireCd*(0.8+Math.random()*0.5); }
     }
   }
 
@@ -1888,10 +2013,10 @@ function update(dt){
     if(p.trail){ p.trailT+=dt; if(p.trailT>=0.05){ p.trailT=0;
       if(p.fx==='plasma'){ fxFlash(p.mesh.position, p.color, 2.4); if(Math.random()<0.6) fxSpark(p.mesh.position, p.color); }
       else fxPuff(p.mesh.position, 0xb8bcc6, 1.4, 0.4); } }
-    let dead = p.traveled>p.range || p.mesh.position.y<0;
+    let dead = p.traveled>p.range || p.mesh.position.y < terrainHeightAt(p.mesh.position.x, p.mesh.position.z);
     let directHit=false;
     // obstacle hit
-    if(!dead) for(const o of obstacles){ if(Math.abs(p.mesh.position.x-o.x)<o.hw-6 && Math.abs(p.mesh.position.z-o.z)<o.hd-6 && p.mesh.position.y<(o.mesh.geometry.parameters.height||80)){ dead=true; break; } }
+    if(!dead) for(const o of obstacles){ if(Math.abs(p.mesh.position.x-o.x)<o.hw-6 && Math.abs(p.mesh.position.z-o.z)<o.hd-6 && p.mesh.position.y<(o.top||80)){ dead=true; break; } }
     if(!dead){
       if(p.owner==='player'){
         for(const e of enemies){ if(!e.alive) continue;
@@ -1899,7 +2024,7 @@ function update(dt){
           const hitR = Math.max(p.proxR||0, 12*e.def.scale);   // missiles get a wider detonation radius
           if(p.mesh.position.distanceTo(c) < hitR){
             damageEnemy(e, p.dmg);
-            if(p.splash){ for(const e2 of enemies){ if(e2!==e&&e2.alive){ const c2=e2.pos.clone(); c2.y=(e2.pos.y||0)+20; if(p.mesh.position.distanceTo(c2)<40) damageEnemy(e2,p.splash);} } }
+            if(p.splash){ const sr=p.splashR||40; for(const e2 of enemies){ if(e2!==e&&e2.alive){ const c2=e2.pos.clone(); c2.y=(e2.pos.y||0)+20; if(p.mesh.position.distanceTo(c2)<sr) damageEnemy(e2,p.splash);} } }
             fxSpark(p.mesh.position, p.color); directHit=true; dead=true; break;
           }
         }
@@ -2617,7 +2742,7 @@ function pauseGame(){
   showScreen('scrPause');
   keepActive(false);
 }
-function resumeGame(){ hideAllScreens(); STATE.mode='playing'; $('#hud').classList.add('on'); if(isTouch&&!gpConnected)$('#touch').classList.add('on'); if(!isTouch&&!gpConnected)$('#scene').requestPointerLock(); keepActive(true); }
+function resumeGame(){ hideAllScreens(); STATE.mode='playing'; try{ if(FS.supported()) FS.want(true); }catch(e){} $('#hud').classList.add('on'); if(isTouch&&!gpConnected)$('#touch').classList.add('on'); if(!isTouch&&!gpConnected)$('#scene').requestPointerLock(); keepActive(true); }
 
 /* ============================================================
    WIRE UP UI
@@ -2634,12 +2759,9 @@ function wireUI(){
     SAVE=DEFAULT_SAVE(); try{ await Store.set(SAVE_KEY, JSON.stringify(SAVE)); }catch(e){}
     refreshTitle(); updateSaveStatus(); toast('セーブを消去しました');
   };
-  // fullscreen (best-effort; iPad支持は限定的)
+  // fullscreen — toggle + keep it locked (auto-reenters if the OS gesture drops it)
   $('#btnFull').onclick=()=>{
-    const el=document.documentElement;
-    const req=el.requestFullscreen||el.webkitRequestFullscreen;
-    if(document.fullscreenElement||document.webkitFullscreenElement){ (document.exitFullscreen||document.webkitExitFullscreen).call(document); }
-    else if(req){ req.call(el).catch(()=>toast('この環境では全画面に未対応です',true)); }
+    if(FS.supported()){ FS.toggle(); }
     else { toast('全画面はホーム画面に追加すると有効になります',true); }
   };
   // export save as downloadable JSON
@@ -2725,6 +2847,8 @@ function wireUI(){
   $('#btnLaunch').onclick=()=>{
     if(cstate(SAVE.current).loadout.length===0){ toast('メックラボで武器を1基以上装備してください',true); return; }
     if(cstate(SAVE.current).armor<=0){ toast('先に整備ベイで装甲を修理してください',true); return; }
+    // launch tap is a user gesture → grab fullscreen and keep it locked for the mission
+    if(FS.supported()) FS.want(true);
     startMission(window._brief);
     if(!isTouch) setTimeout(()=>$('#scene').requestPointerLock(),50);
   };
@@ -2765,6 +2889,60 @@ function renderKeys(){
 }
 
 /* ============================================================
+   FULLSCREEN LOCK
+   iPad の Chrome/Safari では「下から上スワイプ」がOSのホーム操作のため、
+   Web からそのジェスチャー自体を完全に無効化することはできない。そこで
+   全画面が解除されたら即座に「タップで復帰」して全画面を保つ。さらに
+   ホーム画面に追加（スタンドアロン）すればブラウザUIごと消えて最も安定する。
+   ============================================================ */
+const FS = (()=>{
+  const root=()=>document.documentElement;
+  let wanted=false, promptEl=null;
+  function supported(){ const e=root(); return !!(e.requestFullscreen||e.webkitRequestFullscreen||document.fullscreenEnabled||document.webkitFullscreenEnabled); }
+  function isOn(){ return !!(document.fullscreenElement||document.webkitFullscreenElement); }
+  function request(){
+    const e=root(); const r=e.requestFullscreen||e.webkitRequestFullscreen;
+    try{ const p=r&&r.call(e,{navigationUI:'hide'}); return (p&&p.catch)?p.catch(()=>{}):Promise.resolve(); }
+    catch(_){ try{ r&&r.call(e); }catch(__){} return Promise.resolve(); }
+  }
+  function exit(){ const x=document.exitFullscreen||document.webkitExitFullscreen; if(x) try{ x.call(document); }catch(_){} }
+  function toggle(){ if(isOn()){ wanted=false; showPrompt(false); exit(); } else { wanted=true; request(); } }
+  function want(v){ wanted=v; if(v) request(); }
+  function ensurePrompt(){
+    if(promptEl) return promptEl;
+    promptEl=document.createElement('div');
+    promptEl.style.cssText='position:fixed;inset:0;z-index:1200;display:none;align-items:center;justify-content:center;'+
+      'background:rgba(4,8,5,.86);color:#cfe8d6;font-family:Orbitron,monospace;text-align:center;padding:24px;';
+    promptEl.innerHTML='<div style="max-width:420px;line-height:1.8">'+
+      '<div style="font-size:20px;font-weight:900;color:#3dff7a;letter-spacing:.08em">全画面が解除されました</div>'+
+      '<div style="margin-top:14px;font-size:14px">画面を<b>タップ</b>すると全画面に復帰します。<br>'+
+      'iPadでは画面下からのスワイプはOSの操作のため完全には防げません。<br>'+
+      '最も安定させるには <b>共有 → ホーム画面に追加</b> から起動してください。</div></div>';
+    document.body.appendChild(promptEl);
+    return promptEl;
+  }
+  function showPrompt(show){ ensurePrompt().style.display = show?'flex':'none'; }
+  function reentry(){ if(wanted && !isOn() && STATE.mode==='playing'){ request().then(()=>{ if(isOn()) showPrompt(false); }); } }
+  function onChange(){
+    if(isOn()) showPrompt(false);
+    else if(wanted && STATE.mode==='playing') showPrompt(true);
+  }
+  function init(){
+    document.addEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    // any tap while we want fullscreen but lost it → jump straight back in
+    window.addEventListener('touchend', reentry, {passive:true});
+    window.addEventListener('pointerdown', reentry, {passive:true});
+    // suppress pinch-zoom / multi-touch scroll that can pull in the browser chrome mid-mission
+    document.addEventListener('touchmove', e=>{ if(STATE.mode==='playing' && e.touches.length>1) e.preventDefault(); }, {passive:false});
+    document.addEventListener('gesturestart', e=>e.preventDefault());
+    // returning to the tab — re-assert fullscreen if we still want it
+    document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) reentry(); });
+  }
+  return {init, request, exit, toggle, want, isOn, supported, showPrompt};
+})();
+
+/* ============================================================
    BOOT
    ============================================================ */
 function fatal(msg){
@@ -2783,6 +2961,7 @@ async function boot(){
   touchPref = (SAVE.settings && SAVE.settings.touchMode) || 'auto';
   isTouch = computeTouch();
   // UI must come up regardless of 3D state so the player is never stuck.
+  try{ FS.init(); }catch(e){ console.warn(e); }
   try{ initInput(); }catch(e){ console.warn(e); }
   try{ wireUI(); }catch(e){ console.warn(e); }
   try{ refreshTitle(); refreshModeButtons(); updateSaveStatus(); }catch(e){ console.warn(e); }
