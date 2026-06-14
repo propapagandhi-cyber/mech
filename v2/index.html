@@ -76,6 +76,16 @@
   #statusBox{left:2%; top:3%; width:200px;}
   #throttleRow{display:flex; justify-content:space-between; align-items:baseline; margin-top:8px;}
 
+  /* AI 僚機ランス (top-left, under status) */
+  #lanceBox{left:2%; top:25%; width:190px;}
+  .hud.touchui #lanceBox{top:auto; bottom:34%;}
+  .lance{display:flex; align-items:center; gap:6px; font-size:11px; padding:2px 0;}
+  .lance .nm{flex:1; color:#bfeccb; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .lance .lbar{width:46px; height:6px; background:#0a0f0a; border:1px solid #1c2a1c; border-radius:2px; overflow:hidden; flex:0 0 auto;}
+  .lance .lbar > i{display:block; height:100%;}
+  .lance.down{opacity:.5;}
+  .lance.down .nm{text-decoration:line-through;}
+
   /* weapons (bottom-right) */
   #weaponBox{right:2%; bottom:13%; width:230px;}
   /* touch mode: fire/jet buttons live bottom-right, so park the weapon list top-right under the target panel */
@@ -287,6 +297,11 @@
         <canvas id="doll" width="58" height="74" style="flex:0 0 auto;"></canvas>
         <div class="label" style="font-size:9px;line-height:1.4;opacity:.75;">部位装甲<br>頭/胴/腕/脚</div>
       </div>
+    </div>
+
+    <div class="panel" id="lanceBox" style="display:none;">
+      <div class="label" style="margin-bottom:4px;">僚機ランス</div>
+      <div id="lanceList"></div>
     </div>
 
     <div class="panel" id="heatBox">
@@ -555,6 +570,32 @@ const CHASSIS = {
   atl: {id:'atl', name:'アトラス',    cls:'重量',  ton:60, slots:6, maxArmorBase:320, structure:160, speed:24, turn:1.05,baseCool:7,  cost:1250000, jet:0.55},
   dire:{id:'dire', name:'ダイアウルフ',cls:'強襲',  ton:88, slots:7, maxArmorBase:400, structure:240, speed:18, turn:0.8, baseCool:8,  cost:3400000, jet:0.35},
 };
+
+/* ---------- DATA: AI僚機（味方ランスメイト） ----------
+   雇用してランスに編成すると、出撃時に味方AIメックとして共闘する。
+   chassis=車体 / weps=搭載兵装（火力・射程の算出に使用） / move=機動AI個性。 */
+const WINGMEN = {
+  ace:  {id:'ace',  name:'“ケストレル”軽機',   chassis:'cmd', weps:['mdlas','mdlas','ac2'],  color:0x4ad6a0, move:'skirmish', cost:0,      free:true,
+         bio:'軽量級の偵察僚機。跳躍で間合いを詰め、レーザーで撹乱する。'},
+  iron: {id:'iron', name:'“アイアンサイド”中量機', chassis:'cnt', weps:['lglas','ac10','srm'],  color:0x46b0ff, move:'strafer',  cost:280000,
+         bio:'中量級の主力僚機。バランス型で前線を支える堅実な相棒。'},
+  titan:{id:'titan',name:'“タイタン”強襲機',   chassis:'atl', weps:['ppc','ac20','lrm15'],  color:0x9a8cff, move:'bruiser',   cost:760000,
+         bio:'重量級の火力僚機。鈍足だが圧倒的な装甲と火力で敵を粉砕する。'},
+};
+const WINGMAN_ORDER = ['ace','iron','titan'];
+// chassis → buildMech シルエット（味方は配色で識別する）
+function allyShape(chId){ return chId==='atl'||chId==='dire' ? 'warhammer' : chId==='cnt' ? 'hunchback' : 'locust'; }
+// 雇用機の車体＋兵装から、敵AI／描画パイプラインで使える foe 風 def を合成する
+function allyDef(wid){
+  const W=WINGMEN[wid], ch=CHASSIS[W.chassis];
+  const sum   = W.weps.reduce((s,id)=>s+(WEAPONS[id]?WEAPONS[id].dmg:0),0);
+  const range = W.weps.reduce((m,id)=>Math.max(m, WEAPONS[id]?WEAPONS[id].range:0), 220);
+  const scale = (W.chassis==='atl'||W.chassis==='dire')?1.2 : W.chassis==='cnt'?1.0 : 0.92;
+  return { name:W.name, color:W.color, scale, shape:allyShape(W.chassis), move:W.move,
+           structure: ch.maxArmorBase + ch.structure,           // 総耐久 = 装甲上限 + 内部構造
+           speed: ch.speed, dmg: Math.round(sum*0.7), range, fireCd:1.4,
+           jump: ch.jet>0.6?1.0:0, jumpCd:[4,8], strafeCd:[1.4,3] };
+}
 
 /* ---------- DATA: hit locations (本家メックウォーリア式の部位ダメージ) ----------
    頭部 / 胴中央 / 左右胴 / 左右腕 / 左右脚 に装甲と内部構造を分配する。
@@ -828,9 +869,12 @@ const DEFAULT_SAVE = () => ({
   },
   inventory:['smlas'],            // spare weapons not fitted
   unlockedMission:0,
+  hiredWingmen:['ace'],           // 雇用済みの僚機（無料の初期僚機を含む）
+  lance:['ace'],                  // 出撃に随伴する僚機（最大2機）
   stats:{kills:0, missions:0, deaths:0, damage:0},
   settings:{sens:110, sound:true},
 });
+const LANCE_MAX = 2;             // 同時出撃できる僚機の上限
 
 let SAVE = DEFAULT_SAVE();
 
@@ -879,6 +923,12 @@ function sanitizeSave(s){
      && Object.values(out.chassisState).every(c=>c.loadout.length===0)){
     out.chassisState.cmd.loadout = [{id:'mdlas',grp:1,mount:'ra'},{id:'mdlas',grp:1,mount:'la'},{id:'ac2',grp:2,mount:'rt'}];
   }
+  // AI 僚機: 雇用済み（常に無料機を含む） + 出撃ランス（雇用済みのみ・上限あり）
+  out.hiredWingmen = Array.isArray(s.hiredWingmen) ? s.hiredWingmen.filter(id=>WINGMEN[id]) : [];
+  for(const id of WINGMAN_ORDER){ if(WINGMEN[id].free && !out.hiredWingmen.includes(id)) out.hiredWingmen.unshift(id); }
+  out.lance = (Array.isArray(s.lance) ? s.lance.filter(id=>WINGMEN[id] && out.hiredWingmen.includes(id)) : [])
+                .slice(0, LANCE_MAX);
+  if(!out.lance.length){ const free=WINGMAN_ORDER.find(id=>WINGMEN[id].free); if(free) out.lance=[free]; }
   // stats
   const st = (s.stats&&typeof s.stats==='object')?s.stats:{};
   out.stats = {kills:num(st.kills,0), missions:num(st.missions,0), deaths:num(st.deaths,0), damage:num(st.damage,0)};
@@ -1467,6 +1517,7 @@ const player = {
   lastHit:null, lastHitT:0,
 };
 let enemies=[];        // {grp, def, pos, hp, maxhp, fireCd, vel, alive}
+let allies=[];         // AI僚機 {grp, def, wid, pos, hp, maxhp, loc, alive, eye, vy, fireCd, ...}
 let structures=[];     // {grp, def, type, pos, hp, maxhp, alive, isObjective, radius, aimY, height, fireCd}
 let projectiles=[];    // {mesh, vel, dmg, range, traveled, owner, splash, homing, target, color}
 let beams=[];          // transient hitscan beams {a,b,life,color}
@@ -1573,6 +1624,7 @@ function startMission(mi){
   // place the player on the (now-generated) terrain at the deploy point
   player.pos.set(dep.x, terrainHeightAt(dep.x, dep.z), dep.z);
   clearActors();
+  spawnAllies();
   setMode('playing');
   bigMsg('契約: '+mission.name);
   spawnStage();
@@ -1580,6 +1632,7 @@ function startMission(mi){
 }
 function clearActors(){
   enemies.forEach(e=>scene.remove(e.grp)); enemies=[];
+  allies.forEach(a=>scene.remove(a.grp)); allies=[];
   structures.forEach(s=>scene.remove(s.grp)); structures=[];
   projectiles.forEach(p=>scene.remove(p.mesh)); projectiles=[];
   beams=[]; target=null;
@@ -1624,6 +1677,119 @@ function spawnFoes(list, opt){
     spawnFoe(type, c.x, c.z, ang, dist);
   });
 }
+/* ---------- AI 僚機（味方ランス） ---------- */
+// deploy the player's lance beside/behind the drop point so they advance together
+function spawnAllies(){
+  allies.forEach(a=>scene.remove(a.grp)); allies=[];
+  const lance=(SAVE.lance||[]).filter(id=>WINGMEN[id]).slice(0, LANCE_MAX);
+  const sinY=Math.sin(player.yaw), cosY=Math.cos(player.yaw);
+  const fx=-sinY, fz=-cosY, rx=cosY, rz=-sinY;     // forward / right in XZ (yaw 0 => -Z)
+  lance.forEach((id,i)=>{
+    const def=allyDef(id);
+    const grp=buildMech(def);
+    const side=(i%2===0?1:-1)*(34+i*6), back=26+i*12;
+    const x=clamp(player.pos.x - fx*back + rx*side, -ARENA+40, ARENA-40);
+    const z=clamp(player.pos.z - fz*back + rz*side, -ARENA+40, ARENA-40);
+    const pos=new THREE.Vector3(x, terrainHeightAt(x,z), z);
+    grp.position.copy(pos); scene.add(grp);
+    const totArmor=Math.round(def.structure*0.55), totStruct=def.structure-totArmor;
+    allies.push({grp, def, wid:id, pos, hp:def.structure, maxhp:def.structure,
+      loc:makeLocations(totArmor, totStruct), alive:true, eye:9,
+      vy:0, jumping:false, jetT:0, fireCd:1+Math.random(),
+      strafeDir:(Math.random()<0.5?1:-1), strafeCd:1.5, modeCd:1});
+  });
+  if(lance.length) ticker('僚機 '+lance.length+'機 展開 — 共闘開始');
+}
+// nearest hostile (live foe first, else an objective facility) for a wingman to engage
+function allyAcquire(a){
+  let best=null, bd=1e9;
+  for(const e of enemies){ if(!e.alive) continue; const d=a.pos.distanceTo(e.pos); if(d<bd){ bd=d; best=e; } }
+  if(!best) for(const s of structures){ if(!s.alive || !s.isObjective) continue; const d=a.pos.distanceTo(s.pos); if(d<bd){ bd=d; best=s; } }
+  return best;
+}
+// a wingman fires a combined volley as a friendly hitscan (reuses the enemy/struct raycast)
+function allyFire(a, tgt){
+  const from=a.pos.clone(); from.y=(a.pos.y||0)+20*a.def.scale;
+  const tc=targetCenter(tgt);
+  const dir=tc.clone().sub(from).normalize();
+  const hit=raycastEnemies(from, dir, a.def.range+60, true);
+  if(!hit) return false;                              // no clear shot (cover / out of arc)
+  beams.push({a:from, b:hit.point.clone(), life:0.16, color:a.def.color, w:3});
+  fxFlash(from, a.def.color, 2.6); fxFlash(hit.point, a.def.color, 3.2); fxSpark(hit.point, a.def.color);
+  damageAny(hit, a.def.dmg);
+  Audio.laser();
+  return true;
+}
+// damage to a wingman: part-based like a foe, but no kill stats; death is a loss for the player
+function damageAlly(a, dmg){
+  if(!a.alive) return;
+  Audio.hit(); flashMesh(a.grp);
+  let killed=false;
+  if(a.loc){ const r=damageLoc(a, randLoc(a.loc), dmg); killed=r.killed; }
+  else { a.hp-=dmg; killed=a.hp<=0; }
+  if(killed || a.hp<=0){
+    a.alive=false; scene.remove(a.grp);
+    mechDeath(a);
+    ticker('⚠ 僚機『'+a.def.name+'』撃破'); bigMsg('僚機 撃破'); Audio.warn();
+  }
+}
+// drive every living wingman: engage the nearest hostile at weapon range, else regroup
+function updateAllies(dt){
+  const rndR=r=>r[0]+Math.random()*(r[1]-r[0]);
+  for(const a of allies){
+    if(!a.alive) continue;
+    const f=a.def;
+    const tgt=allyAcquire(a); a.combatTarget=tgt;
+    const dest = tgt ? tgt.pos : player.pos, engage=!!tgt;
+    const to=new THREE.Vector3(dest.x-a.pos.x, 0, dest.z-a.pos.z);
+    const dist=to.length(); if(dist>1e-3) to.normalize();
+    const band=f.range*0.7;
+    let mv=new THREE.Vector3();
+    if(!engage){ if(dist>70) mv.copy(to); }                         // form up on the player
+    else if(dist>band) mv.copy(to);                                 // close in to firing range
+    else if(dist<band*0.45) mv.copy(to).multiplyScalar(-1);         // too close — give ground
+    else { a.strafeCd-=dt; if(a.strafeCd<=0){ a.strafeDir*=-1; a.strafeCd=rndR(f.strafeCd); }
+           mv.set(-to.z,0,to.x).multiplyScalar(a.strafeDir*0.6); }  // circle-strafe while firing
+    mv.y=0; if(mv.lengthSq()>1e-4) mv.normalize();
+    // jump jets (jet-capable chassis only)
+    a.jumpCd-=dt;
+    const floorA=terrainHeightAt(a.pos.x, a.pos.z);
+    const grounded=a.pos.y<=floorA+0.1;
+    if((f.jump||0)>0 && grounded && a.jumpCd<=0 && engage && dist>band*0.6){ a.vy=46*f.jump; a.jumping=true; a.jumpCd=rndR(f.jumpCd); }
+    if(!grounded || a.vy>0){ a.vy-=70*dt; a.pos.y+=a.vy*dt; if(a.pos.y<=floorA){ a.pos.y=floorA; a.vy=0; a.jumping=false; } }
+    const airborne=a.pos.y>floorA+2;
+    if(a.vy>1){ a.jetT-=dt; if(a.jetT<=0){ a.jetT=0.05; const fp=a.pos.clone(); fp.y+=2; fxPuff(fp, 0xffd0a0, 2.4*(f.scale||1), 0.3); } }
+    // horizontal move with wall-sliding (mirror the enemy footwork)
+    const prevX=a.pos.x, prevZ=a.pos.z;
+    const step=mv.multiplyScalar(f.speed*(airborne?1.3:1)*enemyLegMul(a)*dt);
+    const nx=clamp(a.pos.x+step.x,-ARENA,ARENA), nz=clamp(a.pos.z+step.z,-ARENA,ARENA);
+    const blocker=(x,z)=>{ for(const o of obstacles){ if(Math.abs(x-o.x)<o.hw && Math.abs(z-o.z)<o.hd && a.pos.y<(o.top||80)-4) return o; } return null; };
+    if(!blocker(nx,nz)){ a.pos.x=nx; a.pos.z=nz; }
+    else if(!blocker(nx,a.pos.z)) a.pos.x=nx;
+    else if(!blocker(a.pos.x,nz)) a.pos.z=nz;
+    const fl2=terrainHeightAt(a.pos.x, a.pos.z);
+    if(a.pos.y<fl2 || (grounded && !a.jumping)){ a.pos.y=fl2; if(a.vy<0) a.vy=0; }
+    a.grp.position.copy(a.pos);
+    // torso tracks the foe; legs face travel
+    const faceX=(engage?tgt.pos.x:player.pos.x)-a.pos.x, faceZ=(engage?tgt.pos.z:player.pos.z)-a.pos.z;
+    const aimYaw=Math.atan2(faceX, faceZ);
+    const mdx=a.pos.x-prevX, mdz=a.pos.z-prevZ;
+    if(a.legYaw===undefined) a.legYaw=aimYaw;
+    const wantLeg=Math.hypot(mdx,mdz)>0.05?Math.atan2(mdx,mdz):aimYaw;
+    a.legYaw=lerpAngle(a.legYaw, wantLeg, Math.min(1,dt*6));
+    const ud=a.grp.userData;
+    if(ud&&ud.torsoG){ ud.torsoG.rotation.y=aimYaw; ud.legsG.rotation.y=a.legYaw; } else a.grp.rotation.y=aimYaw;
+    if(ud&&ud.legsG) ud.legsG.rotation.x=lerpAngle(ud.legsG.rotation.x||0, airborne?-0.5:0, Math.min(1,dt*5));
+    // fire — 火力は健在な兵装腕に比例（部位破壊で減衰）
+    a.fireCd-=dt;
+    const wmul=enemyWeaponMul(a);
+    if(a.fireCd<=0 && engage && dist<f.range && wmul>0){
+      if(allyFire(a,tgt)) a.fireCd=f.fireCd*(0.8+Math.random()*0.5)/Math.max(0.5,wmul);
+      else a.fireCd=0.4;                              // no shot — retry soon while repositioning
+    }
+  }
+}
+
 function spawnStructure(type, cx, cz, ang, dist){
   const def=STRUCTS[type];
   const grp=buildStructure(type);
@@ -2040,21 +2206,38 @@ function mechDeath(e){
   // charred hulk + scorch mark
   spawnWreck(base, e.def.color, sc);
 }
+/* ---------- target selection: foes split fire between the player and the lance ---------- */
+// world-space body centre of an actor (player or wingman) for incoming fire
+function actorAimPoint(a){
+  if(a===player){ const p=player.pos.clone(); p.y=player.eye; return p; }
+  const p=a.pos.clone(); p.y=(a.pos.y||0)+(a.eye||9); return p;
+}
+// pick the foe's victim: nearest of the player / living wingmen, biased toward the player
+function enemyAimActor(e){
+  let best=player, bd=e.pos.distanceTo(player.pos);
+  for(const a of allies){ if(!a.alive) continue;
+    const d=e.pos.distanceTo(a.pos)*1.25;   // wingmen are a little less tempting than the pilot
+    if(d<bd){ bd=d; best=a; }
+  }
+  return best;
+}
+
 /* ---------- screen shake + missile salvo (ripple fire) ---------- */
 let shake=0;
 function addShake(a){ shake=Math.min(2.4, shake+a); }
 let salvo=[];   // pending staggered missile launches (player)
 let eSalvo=[];  // pending staggered missile launches (enemy missile boats)
-// Enemy missile boat fires a staggered rocket salvo at the player. Balanced as a
+// Enemy missile boat fires a staggered rocket salvo at its target. Balanced as a
 // dodgeable threat: modest per-rocket damage, only mild homing, blockable by cover.
-function enemyMissileFire(e, wmul){
+function enemyMissileFire(e, wmul, tgt){
+  tgt=tgt||player;
   const f=e.def;
   const from=e.pos.clone(); from.y=(e.pos.y||0)+22*(f.scale||1);
-  const to=player.pos.clone(); to.y=player.eye;
+  const to=actorAimPoint(tgt);
   if(blockedByObstacle(from,to)) return;
   const baseDir=to.clone().sub(from).normalize();
   const n=Math.max(1, Math.round((f.salvo||4)*(0.5+0.5*(wmul==null?1:wmul))));
-  for(let k=0;k<n;k++) eSalvo.push({e, origin:from.clone(), dir:baseDir.clone(), delay:k*0.12, dmg:f.mdmg||6});
+  for(let k=0;k<n;k++) eSalvo.push({e, tgt, origin:from.clone(), dir:baseDir.clone(), delay:k*0.12, dmg:f.mdmg||6});
   Audio.missile();                         // launch klaxon telegraphs the incoming salvo
 }
 function launchEnemyMissile(s){
@@ -2066,9 +2249,10 @@ function launchEnemyMissile(s){
   mesh.scale.setScalar(1.3);
   const start=s.origin.clone(); start.x+=(Math.random()-0.5)*4; start.z+=(Math.random()-0.5)*4;
   mesh.position.copy(start); scene.add(mesh);
+  const hm = (s.tgt && s.tgt!==player) ? s.tgt : {alive:true, pos:player.pos};
   projectiles.push({mesh, vel:v.multiplyScalar(speed), dmg:s.dmg, range:760, traveled:0, owner:'enemy', speed,
     splash:0, proxR:13, color:0xff5a6a, trail:true, trailT:0,
-    homing:{alive:true, pos:player.pos}, steerMul:0.4});
+    homing:hm, steerMul:0.4});
   fxFlash(start, 0xffd27a, 3);
 }
 function launchMissile(s){
@@ -2089,9 +2273,10 @@ function launchMissile(s){
   Audio.launch(); addShake(0.18);
 }
 
-function enemyFire(e, wmul){
+function enemyFire(e, wmul, tgt){
+  tgt=tgt||player;
   const from = e.pos.clone(); from.y=(e.pos.y||0)+20*e.def.scale;
-  const to = player.pos.clone(); to.y=player.eye;
+  const to = actorAimPoint(tgt);
   if(blockedByObstacle(from,to)) return;
   const dir = to.clone().sub(from).normalize();
   // small inaccuracy
@@ -2228,7 +2413,10 @@ function update(dt){
   for(const e of enemies){
     if(!e.alive) continue;
     const f=e.def;
-    const toP = player.pos.clone().sub(e.pos); toP.y=0;
+    // who this foe is engaging — the player or a wingman (refreshed on mode switch)
+    if(!e.aimActor || !(e.aimActor===player || e.aimActor.alive)) e.aimActor=enemyAimActor(e);
+    const tgtA=e.aimActor, tg=(tgtA===player?player.pos:tgtA.pos);
+    const toP = new THREE.Vector3(tg.x-e.pos.x, 0, tg.z-e.pos.z);
     const distP = toP.length(); toP.normalize();
     const move = f.move||'strafer';
 
@@ -2240,6 +2428,7 @@ function update(dt){
     // ---- tactical mode switching so circling foes don't strafe forever ----
     e.modeCd -= dt;
     if(e.modeCd<=0){
+      e.aimActor=enemyAimActor(e);             // re-evaluate target periodically
       const r=Math.random();
       if(move==='plodder'||move==='bruiser') e.mode='advance';                 // heavies just grind in
       else if(move==='jumpjet')              e.mode = r<0.6?'advance':'strafe'; // flyers stay aggressive
@@ -2310,8 +2499,8 @@ function update(dt){
     const fl2 = terrainHeightAt(e.pos.x, e.pos.z);
     if(e.pos.y < fl2 || (grounded && !e.jumping)){ e.pos.y = fl2; if(e.vy<0) e.vy=0; }
     e.grp.position.copy(e.pos);
-    // torso tracks the player; legs face the direction of actual travel
-    const aimYaw = Math.atan2(player.pos.x-e.pos.x, player.pos.z-e.pos.z);
+    // torso tracks the engaged target; legs face the direction of actual travel
+    const aimYaw = Math.atan2(tg.x-e.pos.x, tg.z-e.pos.z);
     const mdx=e.pos.x-prevX, mdz=e.pos.z-prevZ;
     if(e.legYaw===undefined) e.legYaw=aimYaw;
     const wantLeg = Math.hypot(mdx,mdz)>0.05 ? Math.atan2(mdx,mdz) : aimYaw;
@@ -2325,10 +2514,12 @@ function update(dt){
     e.fireCd -= dt;
     const wmul=enemyWeaponMul(e);
     if(e.fireCd<=0 && distP < f.range && wmul>0){
-      if(f.missile){ enemyMissileFire(e, wmul); e.fireCd = (f.mcd||3.5)*(0.85+Math.random()*0.4); }
-      else { enemyFire(e, wmul); e.fireCd = f.fireCd*(0.8+Math.random()*0.6); }
+      if(f.missile){ enemyMissileFire(e, wmul, tgtA); e.fireCd = (f.mcd||3.5)*(0.85+Math.random()*0.4); }
+      else { enemyFire(e, wmul, tgtA); e.fireCd = f.fireCd*(0.8+Math.random()*0.6); }
     }
   }
+  // ---- AI 僚機 ----
+  updateAllies(dt);
 
   // ---- facilities: blink beacons, spin radar dishes, aim + fire defensive turrets ----
   const beaconLit = (Math.sin(performance.now()/220) > -0.2) ? 1.4 : 0.12;
@@ -2397,8 +2588,13 @@ function update(dt){
           }
         }
       } else {
-        const c=player.pos.clone(); c.y=player.eye;
-        if(p.mesh.position.distanceTo(c) < (p.proxR||11)){ hurtPlayer(p.dmg, playerHitLoc(p.mesh.position)); fxSpark(p.mesh.position, p.color); dead=true; }
+        // enemy round — can hit a wingman as well as the player
+        for(const a of allies){ if(!a.alive) continue;
+          const ca=a.pos.clone(); ca.y=(a.pos.y||0)+20*a.def.scale;
+          if(p.mesh.position.distanceTo(ca) < Math.max(p.proxR||11, 12*a.def.scale)){ damageAlly(a, p.dmg); fxSpark(p.mesh.position, p.color); dead=true; break; }
+        }
+        if(!dead){ const c=player.pos.clone(); c.y=player.eye;
+          if(p.mesh.position.distanceTo(c) < (p.proxR||11)){ hurtPlayer(p.dmg, playerHitLoc(p.mesh.position)); fxSpark(p.mesh.position, p.color); dead=true; } }
       }
     }
     if(dead){
@@ -2546,6 +2742,25 @@ function updateHUD(){
   // own mech paper-doll
   drawDoll($('#doll'), player.loc, player.lastHit);
 
+  // AI 僚機ランス
+  const lb=$('#lanceBox');
+  if(allies.length){
+    lb.style.display='block';
+    const ll=$('#lanceList'); ll.innerHTML='';
+    for(const a of allies){
+      const pct = a.alive ? clamp(a.hp/a.maxhp*100,0,100) : 0;
+      const col = !a.alive ? '#5a1212' : pct>60?'#3dff7a':pct>30?'#ffd23a':'#ff6a3a';
+      const acol='#'+a.def.color.toString(16).padStart(6,'0');
+      const row=document.createElement('div');
+      row.className='lance'+(a.alive?'':' down');
+      row.innerHTML=`<span style="color:${acol};font-size:12px;">◆</span>`
+        +`<span class="nm">${a.def.name}</span>`
+        +(a.alive?`<span class="lbar"><i style="width:${pct}%;background:${col};"></i></span>`
+                 :`<span style="color:#ff6a3a;font-size:10px;">撃破</span>`);
+      ll.appendChild(row);
+    }
+  } else lb.style.display='none';
+
   // target panel
   if(target && target.alive){
     $('#targetBox').classList.add('on');
@@ -2648,6 +2863,22 @@ function drawOverlay(){
       if(isT){ ctx.fillStyle='#37d6ff'; ctx.font='11px Orbitron, monospace'; ctx.fillText(en.def.name.toUpperCase(), x0, y0-6); }
     }
   }
+  // friendly wingmen — caret + name + slim health bar so the lance reads as allied
+  for(const a of allies){ if(!a.alive) continue;
+    const c=a.pos.clone(); c.y=(a.pos.y||0)+22*a.def.scale; const s=worldToScreen(c);
+    if(!s || s.x<0 || s.x>w || s.y<0 || s.y>h) continue;
+    const col='#'+a.def.color.toString(16).padStart(6,'0');
+    const r=clamp(2000/s.z, 10, 50);
+    ctx.save();
+    ctx.strokeStyle=col; ctx.lineWidth=2; ctx.globalAlpha=.95;
+    ctx.beginPath(); ctx.moveTo(s.x-r,s.y-r+6); ctx.lineTo(s.x,s.y-r); ctx.lineTo(s.x+r,s.y-r+6); ctx.stroke();   // friendly caret
+    const pct=clamp(a.hp/a.maxhp,0,1);
+    ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(s.x-r, s.y-r-6, r*2, 3);
+    ctx.fillStyle = pct>0.5?'#3dff7a':pct>0.25?'#ffd23a':'#ff6a3a'; ctx.fillRect(s.x-r, s.y-r-6, r*2*pct, 3);
+    ctx.fillStyle=col; ctx.font='9px Orbitron, monospace';
+    ctx.fillText('▲ '+a.def.name, s.x-r, s.y-r-9);
+    ctx.restore();
+  }
   // objective facilities — amber diamond markers + off-screen guidance arrows
   for(const st of structures){ if(!st.alive || !st.isObjective) continue;
     const c=st.pos.clone(); c.y=st.aimY; const s=worldToScreen(c);
@@ -2739,6 +2970,17 @@ function drawRadar(){
     if(m>R){ bx=cx+rx*scaleR*R/m; by=cy+rz*scaleR*R/m; }
     ctx.fillStyle = st===target?'#37d6ff':'#ffb000';
     ctx.beginPath(); ctx.moveTo(bx,by-3.4); ctx.lineTo(bx+3.4,by); ctx.lineTo(bx,by+3.4); ctx.lineTo(bx-3.4,by); ctx.fill();
+  }
+  // friendly wingmen — cyan-green diamonds
+  for(const a of allies){ if(!a.alive) continue;
+    const dx=a.pos.x-player.pos.x, dz=a.pos.z-player.pos.z;
+    const c=Math.cos(player.yaw), s=Math.sin(player.yaw);
+    const rx=dx*c-dz*s, rz=dx*s+dz*c;
+    let bx=cx+rx*scaleR, by=cy+rz*scaleR;
+    const m=Math.hypot(rx,rz)*scaleR;
+    if(m>R){ bx=cx+rx*scaleR*R/m; by=cy+rz*scaleR*R/m; }
+    ctx.fillStyle='#4ad6a0';
+    ctx.beginPath(); ctx.moveTo(bx,by-3); ctx.lineTo(bx+3,by); ctx.lineTo(bx,by+3); ctx.lineTo(bx-3,by); ctx.fill();
   }
   // player
   ctx.fillStyle='#3dff7a'; ctx.beginPath(); ctx.moveTo(cx,cy-5); ctx.lineTo(cx-4,cy+4); ctx.lineTo(cx+4,cy+4); ctx.fill();
