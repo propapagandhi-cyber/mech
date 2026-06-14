@@ -720,31 +720,32 @@ function damageLoc(unit, locId, rawDmg){
 //   bruiser  = slow heavy, grinds forward, no jets
 // shape: which silhouette buildMech() renders.  jump: jet thrust (0 = grounded).
 // jumpCd / strafeCd = [min,max] seconds between jumps / direction flips.
+// salvage = 撃破時に回収できる兵装の候補（部品サルベージ）。役割に合わせて設定。
 const FOES = {
   grunt: {name:'ジャベリン',  structure:90,  speed:20, dmg:9,  fireCd:1.2, range:300, color:0x8aa0b8, scale:0.95, reward:8000,
-          shape:'grunt',     move:'plodder',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5]},
+          shape:'grunt',     move:'plodder',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5],    salvage:['mdlas','srm']},
   scout: {name:'ローカスト',   structure:75,  speed:36, dmg:6,  fireCd:0.95,range:280, color:0x7fd0ff, scale:0.80, reward:10000,
-          shape:'locust',    move:'skirmish', jump:0.9, jumpCd:[4,7],    strafeCd:[1.2,2.4]},
+          shape:'locust',    move:'skirmish', jump:0.9, jumpCd:[4,7],    strafeCd:[1.2,2.4], salvage:['smlas','mg']},
   wasp:  {name:'ワスプ',      structure:100, speed:40, dmg:8,  fireCd:1.0, range:300, color:0x9affd0, scale:0.78, reward:14000,
-          shape:'wasp',      move:'jumpjet',  jump:1.6, jumpCd:[2.5,4.5],strafeCd:[0.9,1.6]},
+          shape:'wasp',      move:'jumpjet',  jump:1.6, jumpCd:[2.5,4.5],strafeCd:[0.9,1.6], salvage:['mdlas','srm']},
   med:   {name:'ハンチバック',structure:160, speed:24, dmg:14, fireCd:1.3, range:340, color:0xff8a4a, scale:1.0,  reward:18000,
-          shape:'hunchback', move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[1.8,3.2]},
+          shape:'hunchback', move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[1.8,3.2], salvage:['ac20','mplas']},
   heavy: {name:'ウォーハンマー',structure:270, speed:16, dmg:24, fireCd:1.7, range:430, color:0xff5a5a, scale:1.25, reward:34000,
-          shape:'warhammer', move:'bruiser',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5]},
+          shape:'warhammer', move:'bruiser',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5],    salvage:['ppc','lglas']},
   // ---- vehicles (敵車両) — low silhouette, no jump jets ----
   tank:  {name:'デモリッシャー戦車',structure:150, speed:22, dmg:20, fireCd:1.6, range:400, color:0x6b7a4a, scale:1.0, reward:13000,
-          shape:'tank',      move:'bruiser',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5],   kind:'vehicle'},
+          shape:'tank',      move:'bruiser',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5],   kind:'vehicle', salvage:['ac10','hvy']},
   hover: {name:'ホバータンク',  structure:90,  speed:48, dmg:9,  fireCd:0.85,range:300, color:0x4ab0c8, scale:0.95, reward:11000,
-          shape:'hover',     move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[1.0,2.0],kind:'vehicle'},
+          shape:'hover',     move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[1.0,2.0],kind:'vehicle', salvage:['mg','mdlas']},
   // ---- 新型機（氷衛星エウロパ戦域で初確認） ----
   // カタパルト: 後背ポッドから誘導ロケットを斉射する砲撃機。射程は長いが装甲が薄く、
   //            遮蔽物で斉射をやり過ごして接近すれば仕留められる。＝バランス調整した「ミサイル攻撃」敵。
   missl: {name:'カタパルト',   structure:130, speed:20, dmg:6,  fireCd:1.4, range:470, color:0x9a7cff, scale:1.1,  reward:20000,
           shape:'catapult',  move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[2.2,3.8],
-          missile:true, salvo:4, mdmg:6, mcd:3.6},
+          missile:true, salvo:4, mdmg:6, mcd:3.6, salvage:['lrm','lrm15']},
   // シャドウキャット: 緑装甲の高機動偵察機。跳躍で間合いを詰めながら撹乱射撃を行う。
   ranger:{name:'シャドウキャット',structure:120, speed:38, dmg:11, fireCd:1.0, range:340, color:0x7a9a52, scale:0.95, reward:17000,
-          shape:'shadowcat', move:'skirmish', jump:1.1, jumpCd:[3,6],    strafeCd:[1.0,2.0]},
+          shape:'shadowcat', move:'skirmish', jump:1.1, jumpCd:[3,6],    strafeCd:[1.0,2.0], salvage:['mplas','mdlas']},
 };
 
 /* ---------- DATA: destructible facilities (施設) ----------
@@ -1537,6 +1538,8 @@ let projectiles=[];    // {mesh, vel, dmg, range, traveled, owner, splash, homin
 let beams=[];          // transient hitscan beams {a,b,life,color}
 let laserSide=1;       // alternate left/right arm muzzle for beam visuals
 let mission=null, stageIdx=0, target=null, missionStartArmor=0, killsThisMission=0, dmgThisMission=0;
+let missionSalvage=[];   // 今回の作戦で回収した兵装(部品サルベージ) — 勝利時に兵装庫へ
+let salvageCredits=0;    // 撃破した敵から得たスクラップ収入（クレジット）
 // ---- lock-on (ロックオン) ----  state 0=なし 1=捕捉中 2=ロック確立
 let lockState=0, lockT=0, designated=null;
 const LOCK_TIME=0.45;
@@ -1631,6 +1634,7 @@ function missionStages(m){
 function startMission(mi){
   mission=MISSIONS[mi]; mission._stages=missionStages(mission);
   stageIdx=0; killsThisMission=0; dmgThisMission=0; structKills=0; stageEnding=false;
+  missionSalvage=[]; salvageCredits=0;
   buildPlayerFromSave();
   missionStartArmor=player.armor;
   // deploy point + enemy base — for assault missions you start at the perimeter
@@ -1894,9 +1898,11 @@ function objectiveTicker(){
 }
 
 function winMission(){
-  const reward = mission.reward + killsThisMission*5000 + structKills*9000;
+  const reward = mission.reward + salvageCredits + structKills*9000;
   SAVE.credits += reward;
   SAVE.stats.missions++;
+  // 回収した兵装(部品サルベージ)を兵装庫へ — 装備して再運用できる
+  for(const wid of missionSalvage){ if(WEAPONS[wid]) SAVE.inventory.push(wid); }
   // persist armor damage state
   cstate(SAVE.current).armor = player.armor;
   if(mission.id+1 > SAVE.unlockedMission) SAVE.unlockedMission = Math.min(MISSIONS.length-1, mission.id+1);
@@ -2082,6 +2088,13 @@ function damageEnemy(e, dmg, locId){
   if(killed || e.hp<=0){
     e.alive=false; scene.remove(e.grp);
     killsThisMission++; SAVE.stats.kills++;
+    // ---- 部品サルベージ: スクラップ収入 + 一定確率で兵装を回収 ----
+    salvageCredits += Math.round((e.def.reward||8000)*0.3);
+    const pool=e.def.salvage;
+    if(pool && pool.length && Math.random()<0.33){
+      const wid=pool[(Math.random()*pool.length)|0];
+      if(WEAPONS[wid]){ missionSalvage.push(wid); ticker('◆ 部品回収: '+WEAPONS[wid].name); }
+    }
     Audio.explode();
     if(target===e){ target=null; lockState=0; }
     mechDeath(e);
@@ -3179,7 +3192,8 @@ function openBrief(mi){
   if(t.ambush) waves+='<br><span style="color:var(--red)">⚠ 待ち伏せの情報あり — 接近時に警戒せよ</span>';
   $('#brWaves').innerHTML=waves;
   $('#brReward').innerHTML='契約報酬: <b style="color:var(--amber)">'+fmt(m.reward)+
-    ' C-bills</b> + 撃破サルベージ 1機 5,000'+(t.structs?' / 施設破壊 1基 9,000':'');
+    ' C-bills</b> + 撃破スクラップ収入'+(t.structs?' / 施設破壊 1基 9,000':'')+
+    '<br><span style="color:#4ad6a0">◆ 撃破した敵から兵装(部品)を確率で回収 — 兵装庫に追加され再利用できる</span>';
   const cs=cstate(SAVE.current);
   const armPct=Math.round(cs.armor/maxArmorOf(SAVE.current)*100);
   $('#brMech').innerHTML=`搭乗機: <b>${CHASSIS[SAVE.current].name}</b> · 装甲 ${armPct}% · 武器 ${cstate(SAVE.current).loadout.length} 基装備`+
@@ -3200,11 +3214,20 @@ function showResult(win, reward){
   $('#resTitle').style.color = win?'var(--phos)':'var(--red)';
   $('#resTitle').style.textShadow = win?'0 0 26px rgba(61,255,122,.4)':'0 0 26px rgba(255,58,47,.4)';
   if(win){
+    // 部品サルベージの内訳
+    const counts={}; missionSalvage.forEach(w=>counts[w]=(counts[w]||0)+1);
+    const parts=Object.keys(counts).map(w=>WEAPONS[w].name+(counts[w]>1?' ×'+counts[w]:'')).join('・');
     $('#resBody').innerHTML =
       `敵撃破数: <b>${killsThisMission}</b><br>`+
       (structKills?`施設破壊: <b>${structKills}</b> 基<br>`:'')+
       `被ダメージ: <b>${Math.round(missionStartArmor-player.armor)}</b> 装甲<br>`+
-      `報酬: <span class="credits">${fmt(reward)} C-bills</span><br>`+
+      `<div class="hr" style="margin:8px auto; max-width:320px;"></div>`+
+      `契約報酬: <b>${fmt(mission.reward)}</b> C-bills<br>`+
+      `スクラップ収入: <b>${fmt(salvageCredits)}</b> C-bills<br>`+
+      (structKills?`施設破壊報酬: <b>${fmt(structKills*9000)}</b> C-bills<br>`:'')+
+      `<span style="color:#4ad6a0">◆ 部品サルベージ: <b>${parts||'なし'}</b></span><br>`+
+      `<div class="hr" style="margin:8px auto; max-width:320px;"></div>`+
+      `総報酬: <span class="credits">${fmt(reward)} C-bills</span><br>`+
       `資金: <b>${fmt(SAVE.credits)} C-bills</b>`;
   } else {
     $('#resBody').innerHTML =
