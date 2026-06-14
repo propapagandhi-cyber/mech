@@ -214,6 +214,7 @@
   #fire2{right:150px; bottom:60px; width:78px; height:78px; font-size:12px;}
   #jet{right:64px; bottom:168px; width:72px; height:72px; font-size:12px; color:var(--cyan); border-color:#1e4458;}
   #cycle{right:176px; bottom:158px; width:64px; height:64px; font-size:11px; color:var(--cyan); border-color:#1e4458;}
+  #cmd{right:176px; bottom:230px; width:64px; height:64px; font-size:11px; color:var(--amber); border-color:#5a4410;}
   #lockBtn{right:176px; bottom:64px; width:64px; height:64px; font-size:11px; color:var(--cyan); border-color:#1e4458;}
   #pauseBtn{left:50%; transform:translateX(-50%); top:14px; width:56px; height:42px; border-radius:8px; font-size:18px; letter-spacing:.1em;}
   #pauseBtn.press{transform:translateX(-50%) scale(.92);}
@@ -258,6 +259,7 @@
     #fire2{width:60px; height:60px; right:106px; bottom:34px; font-size:11px;}
     #jet{width:56px; height:56px; right:40px; bottom:116px;}
     #cycle{width:52px; height:52px; right:118px; bottom:110px; font-size:10px;}
+    #cmd{width:52px; height:52px; right:118px; bottom:170px; font-size:10px;}
     #lockBtn{width:52px; height:52px; right:118px; bottom:34px; font-size:10px;}
     #lookzone{top:52px; bottom:160px;}
     .wrap{padding:28px 16px 60px;}
@@ -300,7 +302,7 @@
     </div>
 
     <div class="panel" id="lanceBox" style="display:none;">
-      <div class="label" style="margin-bottom:4px;">僚機ランス</div>
+      <div class="label" id="lanceHdr" style="margin-bottom:4px;">僚機ランス</div>
       <div id="lanceList"></div>
     </div>
 
@@ -348,6 +350,7 @@
     <div class="tbtn" id="fire2">射撃&nbsp;2</div>
     <div class="tbtn" id="jet">JET</div>
     <div class="tbtn" id="cycle">目標&nbsp;▸</div>
+    <div class="tbtn" id="cmd">指示&nbsp;▸</div>
     <div class="tbtn" id="lockBtn">ロック</div>
     <div class="tbtn" id="pauseBtn">❚❚</div>
   </div>
@@ -426,6 +429,7 @@
         <div class="tab on" data-tab="loadout">装備</div>
         <div class="tab" data-tab="arsenal">武器市場</div>
         <div class="tab" data-tab="bay">整備ベイ</div>
+        <div class="tab" data-tab="lance">僚機</div>
       </div>
 
       <!-- LOADOUT -->
@@ -475,6 +479,15 @@
         </div>
       </div>
 
+      <!-- WINGMEN / LANCE -->
+      <div id="tabLance" style="display:none;">
+        <div class="card">
+          <h2 style="margin-top:0;">僚機ベイ — ランス編成（最大 <span id="lanceCap">2</span> 機）</h2>
+          <p class="note">雇用した僚機を「編成」すると、出撃時に味方AIメックとして随伴する。戦闘中は <b>C</b>（パッド: X / タッチ: 指示）で <b>各個撃破 / 集中攻撃 / 護衛 / 退避</b> を切り替えられる。</p>
+          <div id="wingList" class="mlist"></div>
+        </div>
+      </div>
+
       <div class="btnrow">
         <button class="btn" id="btnLabDeploy">契約へ</button>
         <button class="btn ghost" id="btnLabBack">タイトル</button>
@@ -491,6 +504,7 @@
       <div class="stat" id="brWaves"></div>
       <div class="stat" id="brReward" style="margin-top:6px;"></div>
       <div class="stat" id="brMech" style="margin-top:6px;"></div>
+      <div class="stat" id="brLance" style="margin-top:6px;"></div>
       <div class="btnrow">
         <button class="btn lg" id="btnLaunch">出撃 — 降下開始</button>
         <button class="btn ghost" id="btnBriefLab">先に再装備</button>
@@ -1529,6 +1543,18 @@ const LOCK_TIME=0.45;
 let structKills=0, stageReinforced=false, stageEnding=false;
 const keys={};
 let invuln=0;
+// ---- 僚機への戦術コマンド ----
+//   free=各個撃破（最寄り） / focus=集中攻撃（プレイヤーの目標） / guard=護衛（追従・近接のみ交戦） / fallback=退避（後退・射撃停止）
+const LANCE_ORDERS=['free','focus','guard','fallback'];
+const LANCE_ORDER_JP={free:'各個撃破', focus:'集中攻撃', guard:'護衛', fallback:'退避'};
+let lanceOrder='free';
+function cycleLanceOrder(){
+  if(!allies.some(a=>a.alive)){ toast('随伴中の僚機がいません', true); return; }
+  lanceOrder = LANCE_ORDERS[(LANCE_ORDERS.indexOf(lanceOrder)+1)%LANCE_ORDERS.length];
+  const jp=LANCE_ORDER_JP[lanceOrder];
+  bigMsg('僚機指示: '+jp); ticker('▶ 僚機指示: '+jp);
+  if(lanceOrder==='focus' && (!target || !target.alive)) ticker('▶ 僚機指示: 集中攻撃 — 目標を指定せよ');
+}
 
 /* ---------- chassis state helpers ---------- */
 function cstate(id){
@@ -1681,6 +1707,7 @@ function spawnFoes(list, opt){
 // deploy the player's lance beside/behind the drop point so they advance together
 function spawnAllies(){
   allies.forEach(a=>scene.remove(a.grp)); allies=[];
+  lanceOrder='free';                                  // every contract starts on 各個撃破
   const lance=(SAVE.lance||[]).filter(id=>WINGMEN[id]).slice(0, LANCE_MAX);
   const sinY=Math.sin(player.yaw), cosY=Math.cos(player.yaw);
   const fx=-sinY, fz=-cosY, rx=cosY, rz=-sinY;     // forward / right in XZ (yaw 0 => -Z)
@@ -1739,13 +1766,24 @@ function updateAllies(dt){
   for(const a of allies){
     if(!a.alive) continue;
     const f=a.def;
-    const tgt=allyAcquire(a); a.combatTarget=tgt;
-    const dest = tgt ? tgt.pos : player.pos, engage=!!tgt;
+    // ---- target & engagement governed by the lance order ----
+    const order=lanceOrder;
+    const tgt=(order==='focus' && target && target.alive) ? target : allyAcquire(a);
+    a.combatTarget=tgt;
+    const distLeader=a.pos.distanceTo(player.pos);
+    const leash = order==='guard'?72 : order==='fallback'?52 : Infinity;   // how far we may stray from the leader
+    // engage when we have a target, aren't retreating, and are either unleashed or already in reach
+    let engage = !!tgt && order!=='fallback' && (distLeader<=leash || (tgt && a.pos.distanceTo(tgt.pos)<f.range));
+    // if we've drifted past the leash and can't shoot from here, regrouping on the leader wins
+    const regroup = distLeader>leash && !(engage && tgt && a.pos.distanceTo(tgt.pos)<f.range);
+    if(regroup) engage=false;
+    const dest = engage ? tgt.pos : player.pos;
     const to=new THREE.Vector3(dest.x-a.pos.x, 0, dest.z-a.pos.z);
     const dist=to.length(); if(dist>1e-3) to.normalize();
     const band=f.range*0.7;
+    const followGap = order==='fallback'?22 : order==='guard'?40 : 70;     // how close we hold on the leader
     let mv=new THREE.Vector3();
-    if(!engage){ if(dist>70) mv.copy(to); }                         // form up on the player
+    if(!engage){ if(dist>followGap) mv.copy(to); }                  // form up / fall back on the player
     else if(dist>band) mv.copy(to);                                 // close in to firing range
     else if(dist<band*0.45) mv.copy(to).multiplyScalar(-1);         // too close — give ground
     else { a.strafeCd-=dt; if(a.strafeCd<=0){ a.strafeDir*=-1; a.strafeCd=rndR(f.strafeCd); }
@@ -2746,6 +2784,8 @@ function updateHUD(){
   const lb=$('#lanceBox');
   if(allies.length){
     lb.style.display='block';
+    const anyAlive=allies.some(a=>a.alive);
+    $('#lanceHdr').textContent = anyAlive ? ('僚機ランス — '+LANCE_ORDER_JP[lanceOrder]) : '僚機ランス';
     const ll=$('#lanceList'); ll.innerHTML='';
     for(const a of allies){
       const pct = a.alive ? clamp(a.hp/a.maxhp*100,0,100) : 0;
@@ -3081,6 +3121,12 @@ function openBrief(mi){
   const armPct=Math.round(cs.armor/maxArmorOf(SAVE.current)*100);
   $('#brMech').innerHTML=`搭乗機: <b>${CHASSIS[SAVE.current].name}</b> · 装甲 ${armPct}% · 武器 ${cstate(SAVE.current).loadout.length} 基装備`+
     (armPct<60?' · <span style="color:var(--amber)">修理を推奨</span>':'');
+  // 随伴ランス（編成済みの僚機）— ブリーフィングで確認
+  const lance=(SAVE.lance||[]).filter(id=>WINGMEN[id]).slice(0, LANCE_MAX);
+  $('#brLance').innerHTML = lance.length
+    ? '随伴僚機: ' + lance.map(id=>{ const W=WINGMEN[id]; const c='#'+W.color.toString(16).padStart(6,'0');
+        return `<b style="color:${c}">◆ ${W.name}</b>`; }).join(' · ')
+    : '随伴僚機: <span style="opacity:.7">なし（僚機ベイで編成可能）</span>';
   showScreen('scrBrief');
 }
 
@@ -3116,10 +3162,43 @@ function switchTab(t){
   $('#tabLoadout').style.display = t==='loadout'?'block':'none';
   $('#tabArsenal').style.display = t==='arsenal'?'block':'none';
   $('#tabBay').style.display = t==='bay'?'block':'none';
+  $('#tabLance').style.display = t==='lance'?'block':'none';
 }
 function renderLab(){
   $('#labCredits').textContent=fmt(SAVE.credits)+' C-bills';
-  renderLoadout(); renderArsenal(); renderBay();
+  renderLoadout(); renderArsenal(); renderBay(); renderLance();
+}
+// 僚機ベイ: 雇用 と ランス編成（最大 LANCE_MAX 機）
+function renderLance(){
+  const cap=$('#lanceCap'); if(cap) cap.textContent=LANCE_MAX;
+  const wl=$('#wingList'); if(!wl) return; wl.innerHTML='';
+  WINGMAN_ORDER.forEach(id=>{
+    const W=WINGMEN[id], ch=CHASSIS[W.chassis];
+    const hired=SAVE.hiredWingmen.includes(id), inLance=SAVE.lance.includes(id);
+    const wnames=W.weps.map(w=>WEAPONS[w]?WEAPONS[w].name:w).join('・');
+    const acol='#'+W.color.toString(16).padStart(6,'0');
+    const line=document.createElement('div'); line.className='itemline';
+    line.innerHTML=`<div class="nm2">
+        <div class="t"><span style="color:${acol}">◆</span> ${W.name} <span style="color:#7fa389">${ch.cls}</span>${inLance?' <span style="color:#4ad6a0">編成中</span>':''}</div>
+        <div class="d">${ch.name}（${ch.ton}t）· 兵装: ${wnames}</div>
+        <div class="d" style="opacity:.8">${W.bio}</div></div>
+      ${hired?'':'<span class="price">'+(W.free?'無料':fmt(W.cost))+'</span>'}`;
+    const btn=document.createElement('button'); btn.className='mini';
+    if(!hired){
+      btn.textContent = W.free?'取得':'雇用';
+      btn.disabled = !W.free && SAVE.credits<W.cost;
+      btn.onclick=()=>{ if(!W.free && SAVE.credits<W.cost) return; if(!W.free) SAVE.credits-=W.cost;
+        SAVE.hiredWingmen.push(id); persist(); toast(W.name+' を雇用'); renderLab(); };
+    } else if(inLance){
+      btn.textContent='外す';
+      btn.onclick=()=>{ SAVE.lance=SAVE.lance.filter(x=>x!==id); persist(); renderLance(); };
+    } else {
+      const full=SAVE.lance.length>=LANCE_MAX;
+      btn.textContent = full?'満員':'編成'; btn.disabled=full;
+      btn.onclick=()=>{ if(SAVE.lance.length>=LANCE_MAX) return; SAVE.lance.push(id); persist(); renderLance(); };
+    }
+    line.appendChild(btn); wl.appendChild(line);
+  });
 }
 function renderLoadout(){
   const id=SAVE.current, ch=CHASSIS[id], cs=cstate(id);
@@ -3284,6 +3363,7 @@ function initInput(){
       if(k==='2'){ fireHeld[2]=true; }
       if(k==='r'||k==='tab'){ cycleTarget(); }
       if(k==='e'||k==='f'||k==='q'){ toggleLock(); }   // ロックオン
+      if(k==='c'){ cycleLanceOrder(); }                // 僚機への戦術指示
       if(k==='escape'){ pauseGame(); }
       // toggle the diagnostic readout with the backquote key
       if(k==='`'){ window._gpDebugForce=!window._gpDebugForce; }
@@ -3361,6 +3441,7 @@ function initTouch(){
   const tap=(el,fn)=>{ el.addEventListener('touchstart',e=>{e.preventDefault(); press(el,true); fn();},{passive:false});
     const up=()=>press(el,false); el.addEventListener('touchend',up); el.addEventListener('touchcancel',up); };
   tap($('#cycle'), cycleTarget);
+  tap($('#cmd'), cycleLanceOrder);
   tap($('#lockBtn'), toggleLock);
   tap($('#pauseBtn'), pauseGame);
 }
@@ -3410,7 +3491,7 @@ function pollGamepad(dt){
     fireHeld[2] = pressed(6)||pressed(4);
     keys['jet'] = pressed(0)||pressed(1);
     gpFresh(btn,'cycleY',3,cycleTarget);
-    gpFresh(btn,'cycleX',2,cycleTarget);
+    gpFresh(btn,'cmdX',2,cycleLanceOrder);   // X = 僚機への戦術指示
     gpFresh(btn,'stickR',11,cycleTarget);
     gpFresh(btn,'lockL',10,toggleLock);     // L3押し込みでロックオン
     gpFresh(btn,'pause',9,pauseGame);
@@ -3672,16 +3753,18 @@ function renderKeys(){
     ['Space','ジャンプジェット'],
     ['R / Tab','目標切替'],
     ['E / Q / F','ロックオン（照準下の敵を捕捉）'],
+    ['C','僚機指示（各個/集中/護衛/退避）'],
     ['Esc','一時停止 / 設定'],
   ];
-  const tm = isTouch? [['左スティック','移動'],['右側ドラッグ','視点・照準'],['射撃 1 / 射撃 2','武器グループ（長押し）'],['JET','ジャンプジェット（長押し）'],['目標 ▸','目標切替'],['ロック','ロックオン'],['❚❚','一時停止 / メニュー']] : rows;
+  const tm = isTouch? [['左スティック','移動'],['右側ドラッグ','視点・照準'],['射撃 1 / 射撃 2','武器グループ（長押し）'],['JET','ジャンプジェット（長押し）'],['目標 ▸','目標切替'],['指示 ▸','僚機指示（各個/集中/護衛/退避）'],['ロック','ロックオン'],['❚❚','一時停止 / メニュー']] : rows;
   const gpRows=[
     ['左スティック / 十字','移動 / 横移動'],
     ['右スティック','視点・照準'],
     ['ZR / R','トリガーグループ1で射撃'],
     ['ZL / L','トリガーグループ2で射撃'],
     ['A / B','ジャンプジェット'],
-    ['X / Y','目標切替'],
+    ['Y / R3','目標切替'],
+    ['X','僚機指示（各個/集中/護衛/退避）'],
     ['左スティック押込','ロックオン'],
     ['＋ / －','一時停止 / メニュー'],
     ['メニュー: 十字 / 左スティック','項目を選択（カーソル移動）'],
