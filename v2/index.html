@@ -2165,7 +2165,7 @@ function damageEnemy(e, dmg, locId){
     const pool=e.def.salvage;
     if(pool && pool.length && Math.random()<0.33){
       const wid=pool[(Math.random()*pool.length)|0];
-      if(WEAPONS[wid]){ missionSalvage.push(wid); ticker('◆ 部品回収: '+WEAPONS[wid].name); }
+      if(WEAPONS[wid]){ missionSalvage.push(wid); toast('◆ 部品回収: '+WEAPONS[wid].name); }   // toast: 直後の目標ティッカー更新で消えない
     }
     Audio.explode();
     if(target===e){ target=null; lockState=0; }
