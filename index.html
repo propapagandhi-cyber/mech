@@ -522,6 +522,7 @@ const WEAPONS = {
   lrm15: {id:'lrm15', name:'LRM‑15（長距離ミサイル）',        type:'missile',   dmg:5,  heat:7,  cd:2.0,  range:640, ton:7,  cost:178000, ammo:90, proj:135, color:0x8a7cff, count:15, splash:5, homing:true},
   gauss: {id:'gauss', name:'ガウスライフル',          type:'ballistic', dmg:42, heat:2,  cd:2.3,  range:680, ton:8,  cost:255000, ammo:40, proj:460, color:0xd6f2ff, splash:6},
   hvy:   {id:'hvy',   name:'重迫撃砲（施設破砕）',      type:'ballistic', dmg:36, heat:6,  cd:2.0,  range:420, ton:7,  cost:185000, ammo:40, proj:240, color:0xff8a3a, splash:18},
+  plasma:{id:'plasma',name:'ヘヴィプラズマ砲',     type:'ballistic', dmg:46, heat:21, cd:1.9,  range:500, ton:9,  cost:340000, ammo:30, proj:300, color:0x46ffd2, splash:16, trail:true, fx:'plasma'},
 };
 
 /* ---------- DATA: chassis ---------- */
@@ -529,6 +530,7 @@ const CHASSIS = {
   cmd: {id:'cmd', name:'コマンド', cls:'軽量',  ton:25, slots:4, maxArmorBase:120, structure:60,  speed:46, turn:1.9, baseCool:5,  cost:0,       jet:1.0},
   cnt: {id:'cnt', name:'センチュリオン',cls:'中量', ton:38, slots:5, maxArmorBase:200, structure:95,  speed:34, turn:1.5, baseCool:6,  cost:380000,  jet:0.8},
   atl: {id:'atl', name:'アトラス',    cls:'重量',  ton:60, slots:6, maxArmorBase:320, structure:160, speed:24, turn:1.05,baseCool:7,  cost:1250000, jet:0.55},
+  dire:{id:'dire', name:'ダイアウルフ',cls:'強襲',  ton:88, slots:7, maxArmorBase:400, structure:240, speed:18, turn:0.8, baseCool:8,  cost:3400000, jet:0.35},
 };
 
 /* ---------- DATA: enemy templates ---------- */
@@ -1368,6 +1370,14 @@ function fireWeapon(w, origin, dir){
     if(d.type==='ballistic') Audio.cannon(); else Audio.missile();
     fxFlash(muzzle, d.color, heavy?6:3);
     addShake(heavy?0.5:0.14);
+    if(d.fx==='plasma'){   // charged plasma bolt — violent muzzle bloom
+      Audio.explode();
+      fxFlash(muzzle, 0xffffff, 7); fxFlash(muzzle, d.color, 13);
+      fxRing(muzzle, dir, d.color, 6, 0.3);
+      for(let s=0;s<12;s++) fxSpark(muzzle, d.color);
+      fxPuff(muzzle, 0x2a6f63, 4, 0.5);
+      addShake(0.75);
+    }
     const n = d.count||1;
     for(let i=0;i<n;i++){
       const spread = n>1 ? 0.05 : 0.012;
@@ -1375,10 +1385,10 @@ function fireWeapon(w, origin, dir){
       v.x += (Math.random()-0.5)*spread; v.y += (Math.random()-0.5)*spread; v.z += (Math.random()-0.5)*spread;
       v.normalize().multiplyScalar(d.proj);
       const mesh = new THREE.Mesh(GEO_FX, new THREE.MeshBasicMaterial({color:d.color}));
-      mesh.scale.setScalar(heavy?1.3:0.9);
+      mesh.scale.setScalar(d.fx==='plasma'?1.9:(heavy?1.3:0.9));
       mesh.position.copy(muzzle); scene.add(mesh);
       projectiles.push({mesh, vel:v, dmg:d.dmg, range:d.range, traveled:0, owner:'player',
-        splash:d.splash||0, homing:null, color:d.color, trail:(d.id==='ppc'), trailT:0});
+        splash:d.splash||0, homing:null, color:d.color, trail:(d.id==='ppc'||!!d.trail), trailT:0, fx:d.fx||null});
     }
   }
 }
@@ -1508,6 +1518,7 @@ let explosions=[];
 const GEO_FX  = new THREE.SphereGeometry(1,6,6);
 const GEO_SPK = new THREE.SphereGeometry(0.5,4,4);
 const GEO_DEB = new THREE.BoxGeometry(1,1,1);   // flying wreckage shards
+const GEO_RING= new THREE.RingGeometry(0.78,1,28);  // expanding shockwave disc
 let pfx=[];
 let fxQueue=[];                                  // staggered death FX (game-time)
 const FX_CAP=240;
@@ -1529,6 +1540,14 @@ function fxSpark(pos,color){
   const m=new THREE.Mesh(GEO_SPK, fxMat(color||0xffcc66,1)); m.scale.setScalar(0.8+Math.random()); m.position.copy(pos);
   const v=new THREE.Vector3(Math.random()-0.5, Math.random()*0.9, Math.random()-0.5).multiplyScalar(70);
   scene.add(m); pfx.push({mesh:m,t:0,life:0.3+Math.random()*0.2,grow:0,vel:v,grav:true,op0:1});
+}
+// expanding shockwave ring — perpendicular to dir if given, else flat on the ground
+function fxRing(pos,dir,color,size,life){
+  if(pfx.length>FX_CAP) return;
+  const mat=fxMat(color||0xffffff, 0.9); mat.side=THREE.DoubleSide;
+  const m=new THREE.Mesh(GEO_RING, mat); m.position.copy(pos); m.scale.setScalar(size||5);
+  if(dir) m.lookAt(pos.clone().add(dir)); else m.rotation.x=-Math.PI/2;
+  scene.add(m); pfx.push({mesh:m,t:0,life:life||0.34,grow:(size||5)*10,op0:0.9});
 }
 function spawnExplosion(pos, big){
   pos=pos.clone(); if(pos.y<8) pos.y=18;
@@ -1866,7 +1885,9 @@ function update(dt){
     const stepv=p.vel.clone().multiplyScalar(dt);
     p.mesh.position.add(stepv); p.traveled += stepv.length();
     // smoke trail for missiles / PPC
-    if(p.trail){ p.trailT+=dt; if(p.trailT>=0.05){ p.trailT=0; fxPuff(p.mesh.position, 0xb8bcc6, 1.4, 0.4); } }
+    if(p.trail){ p.trailT+=dt; if(p.trailT>=0.05){ p.trailT=0;
+      if(p.fx==='plasma'){ fxFlash(p.mesh.position, p.color, 2.4); if(Math.random()<0.6) fxSpark(p.mesh.position, p.color); }
+      else fxPuff(p.mesh.position, 0xb8bcc6, 1.4, 0.4); } }
     let dead = p.traveled>p.range || p.mesh.position.y<0;
     let directHit=false;
     // obstacle hit
@@ -1899,6 +1920,13 @@ function update(dt){
     if(dead){
       // impact feedback
       if(p.splash){
+        if(p.fx==='plasma'){   // plasma detonation — big bloom + ground shockwave + spark burst
+          const ip=p.mesh.position.clone();
+          spawnExplosion(ip, true);
+          fxFlash(ip, p.color, 12);
+          fxRing(ip, null, p.color, 10, 0.42);
+          for(let s=0;s<10;s++) fxSpark(ip, p.color);
+        } else
         spawnExplosion(p.mesh.position.clone());
         // splash damage to nearby enemies / facilities on a near-miss (ground/obstacle impact)
         if(!directHit && p.owner==='player'){
