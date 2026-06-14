@@ -131,6 +131,10 @@
     border-radius:3px; transition:.14s; box-shadow:inset 0 0 0 0 var(--phos);}
   .btn:hover{background:#13361f; border-color:var(--phos); box-shadow:inset 0 0 22px rgba(61,255,122,.12);}
   .btn:focus-visible{outline:2px solid var(--cyan); outline-offset:2px;}
+  /* gamepad cursor — highlight the control the Pro Controller is pointing at */
+  .gpfocus{outline:3px solid var(--cyan) !important; outline-offset:3px; box-shadow:0 0 18px rgba(110,231,255,.55) !important;
+    position:relative; z-index:2;}
+  .tab.gpfocus, .mini.gpfocus{outline:3px solid var(--cyan) !important; outline-offset:2px;}
   .btn.lg{padding:16px 34px; font-size:16px;}
   .btn.ghost{color:#9fc6ab; border-color:#2a3a2d;}
   .btn.warn{color:var(--amber); border-color:#5a4410;}
@@ -3170,9 +3174,88 @@ function pollGamepad(dt){
     gpFresh(btn,'pause',9,pauseGame);
     gpFresh(btn,'pause2',8,pauseGame);
   } else {
-    gpFresh(btn,'mResume',1,()=>{ if(STATE.mode==='paused') resumeGame(); });
-    gpFresh(btn,'mPlus',9,()=>{ if(STATE.mode==='paused') resumeGame(); });
+    pollMenuNav(btn, ax, now);   // home/title/lab/pause menus — drive the UI with the pad
   }
+}
+/* ---------- gamepad menu cursor (title / lab / pause / etc.) ----------
+   When not in a mission, the Pro Controller drives the on-screen menus:
+   left stick / D-pad move a highlight between buttons, A activates, B goes
+   back, and left/right adjusts a focused slider. Mouse/touch are untouched. */
+let gpMenuScreen='';   // id of the screen the cursor currently lives on
+let gpMenuEl=null;     // the control the cursor is highlighting
+let gpNavDir=0;        // last directional input (for edge + auto-repeat)
+let gpNavNextAt=0;     // earliest time a held direction may repeat
+function gpMenuVisible(el){
+  if(el.disabled) return false;
+  if(el.offsetParent===null) return false;            // inside a display:none panel
+  const r=el.getBoundingClientRect();
+  return r.width>0 && r.height>0;
+}
+function gpFocusList(scr){
+  return Array.from(scr.querySelectorAll('button, input[type=range], .tab')).filter(gpMenuVisible);
+}
+function gpPickDefault(list){
+  return list.find(el=>el.classList.contains('lg'))
+      || list.find(el=>el.classList.contains('btn') && !el.classList.contains('ghost'))
+      || list[0];
+}
+function gpClearFocus(){ if(gpMenuEl){ gpMenuEl.classList.remove('gpfocus'); gpMenuEl=null; } }
+function gpSetFocus(el){
+  if(gpMenuEl && gpMenuEl!==el) gpMenuEl.classList.remove('gpfocus');
+  gpMenuEl=el||null;
+  if(gpMenuEl){
+    gpMenuEl.classList.add('gpfocus');
+    try{ gpMenuEl.focus({preventScroll:true}); }catch(e){}
+    try{ gpMenuEl.scrollIntoView({block:'nearest'}); }catch(e){}
+  }
+}
+function gpBackButton(list){
+  return list.find(el=>/Back$/.test(el.id))
+      || list.find(el=>['戻る','タイトル'].indexOf((el.textContent||'').trim())>=0);
+}
+function pollMenuNav(btn, ax, now){
+  const pressed=i=> !!(btn[i] && btn[i].pressed);
+  const scr=document.querySelector('.screen.on');
+  if(!scr){ gpClearFocus(); gpMenuScreen=''; return; }
+  const list=gpFocusList(scr);
+  if(!list.length) return;
+  // screen changed (or our target vanished) → drop the cursor on the primary action
+  if(scr.id!==gpMenuScreen || list.indexOf(gpMenuEl)<0){
+    gpMenuScreen=scr.id; gpSetFocus(gpPickDefault(list));
+  }
+  const vy=ax[1]||0, vx=ax[0]||0;
+  const up=pressed(12)||vy<-0.5, down=pressed(13)||vy>0.5;
+  const left=pressed(14)||vx<-0.5, right=pressed(15)||vx>0.5;
+  const onRange = gpMenuEl && gpMenuEl.tagName==='INPUT' && gpMenuEl.type==='range';
+  // up/down (and left/right when not on a slider) move the focus cursor
+  let mdir = down?1 : up?-1 : 0;
+  if(!onRange && mdir===0) mdir = right?1 : left?-1 : 0;
+  // left/right tunes a focused slider instead of moving
+  let sdir = onRange ? (right?1 : left?-1 : 0) : 0;
+  const dir = mdir || sdir;
+  if(dir===0){ gpNavDir=0; }
+  else if(dir!==gpNavDir || now>=gpNavNextAt){
+    const first = dir!==gpNavDir;
+    if(mdir){
+      let idx=list.indexOf(gpMenuEl); if(idx<0) idx=0;
+      idx=(idx+mdir+list.length)%list.length;
+      gpSetFocus(list[idx]);
+    } else {
+      const step=parseFloat(gpMenuEl.step)||1;
+      const lo=parseFloat(gpMenuEl.min), hi=parseFloat(gpMenuEl.max);
+      gpMenuEl.value=clamp((parseFloat(gpMenuEl.value)||0)+sdir*step, lo, hi);
+      gpMenuEl.dispatchEvent(new Event('input',{bubbles:true}));
+      gpMenuEl.dispatchEvent(new Event('change',{bubbles:true}));
+    }
+    gpNavDir=dir; gpNavNextAt=now+(first?330:130);
+  }
+  // A (1) activates · B (0) goes back · Plus (9) is a quick resume while paused
+  gpFresh(btn,'mOk',1,()=>{ if(gpMenuEl && gpMenuEl.tagName!=='INPUT') gpMenuEl.click(); });
+  gpFresh(btn,'mBack',0,()=>{
+    if(STATE.mode==='paused'){ resumeGame(); return; }
+    const b=gpBackButton(list); if(b) b.click();
+  });
+  gpFresh(btn,'mPlus',9,()=>{ if(STATE.mode==='paused') resumeGame(); });
 }
 // best-effort nudge to unstick a throttled Bluetooth gamepad (iOS Safari)
 let gpKickAt=0;
@@ -3358,6 +3441,8 @@ function renderKeys(){
     ['X / Y','目標切替'],
     ['左スティック押込','ロックオン'],
     ['＋ / －','一時停止 / メニュー'],
+    ['メニュー: 十字 / 左スティック','項目を選択（カーソル移動）'],
+    ['メニュー: A','決定　·　B：戻る'],
   ];
   const list = gpConnected ? gpRows : (isTouch?tm:rows);
   const el=$('#keyList'); el.innerHTML='';
