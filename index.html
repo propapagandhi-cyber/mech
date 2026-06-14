@@ -596,6 +596,23 @@ const MISSIONS = [
      {msg:'防衛網を突破',           structures:['radar','turret','turret','antenna'], foes:['heavy','med']},
      {msg:'司令部を破壊せよ',       structures:['hq'], foes:['heavy','heavy','wasp'], reinforce:['med','tank']},
    ]},
+  // ---- 基地強襲（広域マップ・外縁から侵攻して敵基地を制圧） ----
+  {id:8, name:'前線基地強襲', diff:'★★★★☆', reward:620000,
+   briefing:'敵の前線基地を強襲する。降着地点は基地から遠く離れた前線の外縁。哨戒部隊を突破して敵基地まで進攻し、外周の防衛タレットを潰してから中枢設備（レーダー・燃料・司令部）を破壊せよ。広大な戦域だ——レーダーで地形と目標を確認しながら進め。',
+   deploy:{x:0,z:820}, base:{x:0,z:-680},
+   stages:[
+     {msg:'敵前線へ進攻 — 哨戒部隊', at:'route', foes:['tank','scout','hover']},
+     {msg:'基地外縁を制圧',         at:'base', structures:['turret','turret','antenna'], foes:['grunt','med']},
+     {msg:'基地中枢を破壊',         at:'base', structures:['radar','fuel','hq'], foes:['heavy','wasp'], reinforce:['med','tank']},
+   ]},
+  {id:9, name:'山岳要塞攻略', diff:'★★★★★', reward:840000,
+   briefing:'山岳地帯の奥に築かれた敵要塞を攻略する。長い峡谷を抜けて要塞へ接近——道中は待ち伏せが予想される。外縁の防衛網を突破し、要塞中枢の燃料庫と司令部を破壊して殲滅せよ。最深部では親衛隊の増援に警戒すること。',
+   deploy:{x:-800,z:780}, base:{x:680,z:-680},
+   stages:[
+     {msg:'峡谷を突破 — 待ち伏せ！', ambush:true, foes:['hover','hover','tank']},
+     {msg:'要塞外縁を制圧',         at:'base', structures:['turret','turret','radar'], foes:['heavy','med']},
+     {msg:'要塞中枢を殲滅',         at:'base', structures:['fuel','fuel','antenna','hq'], foes:['heavy','heavy','wasp'], reinforce:['med','tank']},
+   ]},
 ];
 
 /* ---------- SAVE ---------- */
@@ -794,7 +811,7 @@ const Audio = (()=>{
    THREE scene
    ============================================================ */
 let renderer, scene, camera, clock;
-const ARENA = 620;            // half-size of square arena
+const ARENA = 1000;           // half-size of square arena (large open battlefield)
 let obstacles = [];           // {mesh, box:THREE.Box3, r}
 
 /* ---------- procedural textures (no image assets needed) ---------- */
@@ -848,6 +865,14 @@ function initTextures(){
     c.strokeStyle='rgba(0,0,0,0.4)'; c.lineWidth=2; c.strokeRect(0,0,128,128);
     c.strokeStyle='rgba(0,0,0,0.2)'; c.strokeRect(64,0,64,64); c.strokeRect(0,64,64,64);
   });
+  // mountain rock — banded strata with a pale snow-ish top tint
+  TEX.rock=canvasTex(128,128,c=>{
+    c.fillStyle='#3b4138'; c.fillRect(0,0,128,128);
+    for(let y=0;y<128;y+=4){ c.fillStyle='rgba(0,0,0,'+(0.04+Math.random()*0.10)+')'; c.fillRect(0,y,128,2+Math.random()*2); }
+    for(let i=0;i<500;i++){ const g=Math.random(); c.fillStyle='rgba('+(120+g*60|0)+','+(125+g*60|0)+','+(115+g*55|0)+','+(Math.random()*0.18)+')'; c.fillRect(Math.random()*128,Math.random()*128,2,2); }
+    // snow dusting near the top of the tile
+    for(let i=0;i<400;i++){ const y=Math.random()*42; c.fillStyle='rgba(225,235,230,'+(0.5*(1-y/42))+')'; c.fillRect(Math.random()*128,y,2,2); }
+  });
 }
 
 function initThree(){
@@ -856,9 +881,9 @@ function initThree(){
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a1410);
-  scene.fog = new THREE.Fog(0x0a1410, 300, 1100);
+  scene.fog = new THREE.Fog(0x0a1410, 500, 2400);
 
-  camera = new THREE.PerspectiveCamera(72, 1, 0.5, 3000);
+  camera = new THREE.PerspectiveCamera(72, 1, 0.5, 4200);
 
   const hemi = new THREE.HemisphereLight(0x9fc6ff, 0x20301c, 0.75); scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff0d0, 0.9); sun.position.set(-300,500,200); scene.add(sun);
@@ -885,16 +910,50 @@ function resize(){
   const ov=$('#overlay'); ov.width=w; ov.height=h;
 }
 
-function buildArena(){
-  // clear old obstacles
-  obstacles.forEach(o=>scene.remove(o.mesh)); obstacles=[];
-  // boundary wall ring (visual)
-  const wallMat = new THREE.MeshStandardMaterial({color:0x24130f, roughness:.9, emissive:0x3a0a06, emissiveIntensity:.15});
-  const ringGeo = new THREE.RingGeometry(ARENA*1.55, ARENA*1.7, 64);
-  // scatter buildings — textured facades (windows) + plain roof
-  const count = 16;
+// Rebuild the battlefield. `clear` is a list of {x,z,r} keep-out zones
+// (player deploy, enemy base, the approach corridor) so nothing spawns on top
+// of them and the route to the base stays passable.
+let mountains=[];   // {x,z,r,h} for radar terrain shading
+function buildArena(clear){
+  clear = clear || [{x:0,z:0,r:150}];
+  const blocked=(x,z,pad)=>clear.some(c=>Math.hypot(x-c.x,z-c.z) < c.r+(pad||0));
+  // clear old obstacles + terrain (dispose per-mission GPU resources, but keep the
+  // shared base textures in TEX intact for the next rebuild)
+  const shared=new Set([TEX.ground,TEX.roof,TEX.hull,TEX.rock,...(TEX.bld||[])]);
+  obstacles.forEach(o=>{
+    scene.remove(o.mesh);
+    if(o.mesh.geometry) o.mesh.geometry.dispose();
+    const mats=Array.isArray(o.mesh.material)?o.mesh.material:[o.mesh.material];
+    mats.forEach(m=>{ if(!m) return;
+      if(m.map && !shared.has(m.map)) m.map.dispose();
+      if(m.emissiveMap && m.emissiveMap!==m.map && !shared.has(m.emissiveMap)) m.emissiveMap.dispose();
+      m.dispose(); });
+  });
+  obstacles=[];
+  mountains=[];
+  // ---- mountains (山岳地形): faceted rock cones that block movement + line of sight ----
+  const rockMat = new THREE.MeshStandardMaterial({map:TEX.rock, color:0x8b9486, roughness:1, metalness:0, flatShading:true});
+  const mCount = 16;
+  for(let i=0;i<mCount;i++){
+    let x,z,tries=0;
+    do{ x=(Math.random()*2-1)*ARENA*0.92; z=(Math.random()*2-1)*ARENA*0.92; tries++; }
+    while((blocked(x,z,160) || Math.hypot(x,z)<ARENA*0.22) && tries<40);
+    if(tries>=40) continue;
+    const r = 120+Math.random()*180, h = 160+Math.random()*260;
+    const rt=TEX.rock.clone(); rt.needsUpdate=true; rt.repeat.set(3,3);
+    const mat=rockMat.clone(); mat.map=rt;
+    const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7+((Math.random()*3)|0), 1), mat);
+    m.position.set(x, h/2-4, z);
+    m.rotation.y = Math.random()*Math.PI;
+    scene.add(m);
+    // collide/occlude as a tall column a bit narrower than the visual base
+    obstacles.push({mesh:m, box:null, hw:r*0.72, hd:r*0.72, x, z, mtn:true, mh:h});
+    mountains.push({x,z,r:r*0.72,h});
+  }
+  // ---- buildings — textured facades (windows) + plain roof ----
+  const count = 26;
   for(let i=0;i<count;i++){
-    const w = 30+Math.random()*60, d=30+Math.random()*60, h=30+Math.random()*120;
+    const w = 34+Math.random()*70, d=34+Math.random()*70, h=34+Math.random()*150;
     const facade = TEX.bld[i%TEX.bld.length].clone(); facade.needsUpdate=true;
     facade.repeat.set(Math.max(1,Math.round(w/34)), Math.max(1,Math.round(h/26)));
     const side = new THREE.MeshStandardMaterial({map:facade, color:0xb6c2b8, roughness:.85, metalness:.08,
@@ -903,8 +962,9 @@ function buildArena(){
     const roof = new THREE.MeshStandardMaterial({map:TEX.roof, color:0x9aa39c, roughness:.92, metalness:.05});
     const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), [side,side,roof,roof,side,side]);
     let x,z, tries=0;
-    do{ x=(Math.random()*2-1)*ARENA*0.85; z=(Math.random()*2-1)*ARENA*0.85; tries++; }
-    while(Math.hypot(x,z)<120 && tries<20);
+    do{ x=(Math.random()*2-1)*ARENA*0.88; z=(Math.random()*2-1)*ARENA*0.88; tries++; }
+    while((blocked(x,z,40) || Math.hypot(x,z)<120) && tries<24);
+    if(tries>=24) continue;
     m.position.set(x,h/2,z);
     scene.add(m);
     const box = new THREE.Box3().setFromObject(m);
@@ -1109,8 +1169,19 @@ function startMission(mi){
   stageIdx=0; killsThisMission=0; dmgThisMission=0; structKills=0; stageEnding=false;
   buildPlayerFromSave();
   missionStartArmor=player.armor;
-  // reset world position
-  player.pos.set(0,0,0); player.yaw=0; player.pitch=0; player.vel.set(0,0,0);
+  // deploy point + enemy base — for assault missions you start at the perimeter
+  const dep = mission.deploy || {x:0,z:0};
+  const base = mission.base || null;
+  player.pos.set(dep.x,0,dep.z); player.pitch=0; player.vel.set(0,0,0);
+  // face the base (or map centre) on deploy
+  player.yaw = base ? Math.atan2(-(base.x-dep.x), -(base.z-dep.z)) : 0;
+  // rebuild terrain, keeping the deploy point, base, and the corridor between clear
+  const clear=[{x:dep.x,z:dep.z,r:200}];
+  if(base){
+    clear.push({x:base.x,z:base.z,r:280});
+    for(let t=0.3;t<1;t+=0.22) clear.push({x:dep.x+(base.x-dep.x)*t, z:dep.z+(base.z-dep.z)*t, r:170});
+  } else clear.push({x:0,z:0,r:160});
+  buildArena(clear);
   clearActors();
   setMode('playing');
   bigMsg('契約: '+mission.name);
@@ -1126,12 +1197,12 @@ function clearActors(){
   explosions.forEach(e=>scene.remove(e.mesh)); explosions=[];
   pfx.forEach(f=>scene.remove(f.mesh)); pfx=[];
 }
-// spawn one enemy of `type`, centered on the player (so later stages appear nearby)
-function spawnFoe(type, ang, dist){
+// spawn one enemy of `type` at (cx,cz) + polar offset
+function spawnFoe(type, cx, cz, ang, dist){
   const f=FOES[type];
   const grp=buildMech(f);
-  const x=clamp(player.pos.x+Math.cos(ang)*dist, -ARENA+40, ARENA-40);
-  const z=clamp(player.pos.z+Math.sin(ang)*dist, -ARENA+40, ARENA-40);
+  const x=clamp(cx+Math.cos(ang)*dist, -ARENA+40, ARENA-40);
+  const z=clamp(cz+Math.sin(ang)*dist, -ARENA+40, ARENA-40);
   const pos=new THREE.Vector3(x,0,z);
   grp.position.copy(pos);
   scene.add(grp);
@@ -1144,35 +1215,53 @@ function spawnFoe(type, ang, dist){
     mode:'strafe', modeCd:1+Math.random()*2,
   });
 }
-// ambush foes drop in close + mostly behind the player; normal foes ring in at range
-function spawnFoes(list, ambush){
+// ambush → close & mostly behind the player; base defenders → ring the base;
+// otherwise foes ring in at range around the given centre
+function spawnFoes(list, opt){
   if(!list) return;
+  opt = opt||{};
+  const c = opt.center || {x:player.pos.x, z:player.pos.z};
   list.forEach((type,i)=>{
     const spread=(i/list.length)*Math.PI*2 + Math.random()*0.8;
-    const ang = ambush ? (player.yaw+Math.PI + spread*0.5) : spread;
-    const dist = ambush ? (150+Math.random()*120) : (360+Math.random()*180);
-    spawnFoe(type, ang, dist);
+    const ang = opt.ambush ? (player.yaw+Math.PI + spread*0.5) : spread;
+    const dist = opt.ambush ? (160+Math.random()*130)
+               : opt.tight  ? (90+Math.random()*150)         // base garrison hugs its facilities
+               : (380+Math.random()*220);
+    spawnFoe(type, c.x, c.z, ang, dist);
   });
 }
-function spawnStructure(type, ang, dist){
+function spawnStructure(type, cx, cz, ang, dist){
   const def=STRUCTS[type];
   const grp=buildStructure(type);
-  const x=clamp(player.pos.x+Math.cos(ang)*dist, -ARENA+50, ARENA-50);
-  const z=clamp(player.pos.z+Math.sin(ang)*dist, -ARENA+50, ARENA-50);
+  const x=clamp(cx+Math.cos(ang)*dist, -ARENA+60, ARENA-60);
+  const z=clamp(cz+Math.sin(ang)*dist, -ARENA+60, ARENA-60);
   grp.position.set(x,0,z); scene.add(grp);
   structures.push({grp, def, type, pos:new THREE.Vector3(x,0,z), hp:def.hp, maxhp:def.hp, alive:true,
     isObjective:true, radius:def.hitR, aimY:def.aimY, height:def.height, fireCd:1.2+Math.random()*1.5});
 }
+// where a stage's actors spawn: at the enemy base, along the approach, or near the player
+function stageCenter(st){
+  const base=mission.base;
+  if(base && (st.at==='base' || (st.structures && st.at!=='player' && st.at!=='route')))
+    return {x:base.x, z:base.z};
+  if(base && st.at==='route')
+    return {x:(player.pos.x+base.x)/2, z:(player.pos.z+base.z)/2};
+  return {x:player.pos.x, z:player.pos.z};
+}
 function spawnStage(){
   const st=mission._stages[stageIdx];
   stageReinforced=false; stageEnding=false;
-  // objective facilities — scatter at mid distance around the player
+  const atBase = !!(mission.base && (st.at==='base' || (st.structures && st.at!=='player' && st.at!=='route')));
+  // objective facilities — cluster around the base, else scatter around the player
   const sl=st.structures||[];
+  const sc = atBase ? {x:mission.base.x, z:mission.base.z} : {x:player.pos.x, z:player.pos.z};
   sl.forEach((type,i)=>{
-    const ang=(i/sl.length)*Math.PI*2 + (Math.random()-0.5)*0.6 + Math.random();
-    spawnStructure(type, ang, 240+Math.random()*220);
+    const ang=(i/Math.max(1,sl.length))*Math.PI*2 + (Math.random()-0.5)*0.6 + Math.random();
+    const dist = atBase ? (60+Math.random()*150) : (240+Math.random()*220);
+    spawnStructure(type, sc.x, sc.z, ang, dist);
   });
-  spawnFoes(st.foes, st.ambush);
+  // foes
+  spawnFoes(st.foes, {ambush:st.ambush, center:stageCenter(st), tight:atBase});
   const n=mission._stages.length;
   bigMsg(st.ambush ? '⚠ 待ち伏せ！' : (st.msg ? st.msg : '段階 '+(stageIdx+1)+' / '+n));
   if(st.ambush) Audio.warn();
@@ -1373,7 +1462,7 @@ function damageStruct(s, dmg){
     const st=mission && mission._stages[stageIdx];
     if(st && st.reinforce && !stageReinforced && !stageEnding){
       stageReinforced=true; bigMsg('敵増援 接近！'); Audio.warn();
-      spawnFoes(st.reinforce, false);
+      spawnFoes(st.reinforce, {center:stageCenter(st)});
     }
     objectiveTicker();
     checkStageClear();
@@ -1945,7 +2034,8 @@ function drawOverlay(){
     const c=st.pos.clone(); c.y=st.aimY; const s=worldToScreen(c);
     const dist=Math.round(player.pos.distanceTo(st.pos));
     const isT=st===target;
-    if(s){
+    // on-screen → diamond marker; off-screen / behind → edge guidance arrow
+    if(s && s.x>=0 && s.x<=w && s.y>=0 && s.y<=h){
       const r=clamp(2600/s.z, 12, 64);
       ctx.save(); ctx.strokeStyle=isT?'#37d6ff':'#ffb000'; ctx.fillStyle=isT?'#37d6ff':'#ffb000'; ctx.lineWidth=isT?2.4:1.8;
       ctx.beginPath(); ctx.moveTo(s.x,s.y-r); ctx.lineTo(s.x+r,s.y); ctx.lineTo(s.x,s.y+r); ctx.lineTo(s.x-r,s.y); ctx.closePath(); ctx.stroke();
@@ -1953,7 +2043,7 @@ function drawOverlay(){
       ctx.fillText('◈ '+st.def.name+'  '+dist+'m', s.x-r, s.y-r-5);
       ctx.restore();
     } else {
-      drawEdgeArrow(ctx, c, '#ffb000');
+      drawEdgeArrow(ctx, c, isT?'#37d6ff':'#ffb000');
     }
   }
   // crosshair
@@ -1998,6 +2088,16 @@ function drawRadar(){
   ctx.strokeStyle='rgba(61,255,122,.5)'; ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx+Math.cos(sw)*R, cy+Math.sin(sw)*R); ctx.stroke();
   // blips
   const scaleR = R/ (ARENA*0.9);
+  // terrain: faint mountain footprints for navigation
+  const cyr=Math.cos(player.yaw), syr=Math.sin(player.yaw);
+  ctx.fillStyle='rgba(120,150,120,.22)';
+  for(const mt of mountains){
+    const dx=mt.x-player.pos.x, dz=mt.z-player.pos.z;
+    const rx=dx*cyr-dz*syr, rz=dx*syr+dz*cyr;
+    const bx=cx+rx*scaleR, by=cy+rz*scaleR;
+    if(Math.hypot(bx-cx,by-cy)>R+6) continue;
+    ctx.beginPath(); ctx.arc(bx,by, Math.max(2, mt.r*scaleR), 0, Math.PI*2); ctx.fill();
+  }
   for(const e of enemies){ if(!e.alive) continue;
     const dx=e.pos.x-player.pos.x, dz=e.pos.z-player.pos.z;
     // rotate into player's heading (yaw 0 => forward -Z is up)
@@ -2087,6 +2187,7 @@ function renderMissions(){
     const tags=[t.stages+' 段階', '敵 '+t.foes+'機'];
     if(t.structs) tags.push('破壊目標 '+t.structs);
     if(t.ambush)  tags.push('待ち伏せ');
+    if(m.base)    tags.push('基地強襲');
     const row=document.createElement('div'); row.className='mrow';
     row.innerHTML=`<div class="mi"><div class="t">${m.name}</div>
       <div class="d">${tags.join(' · ')} · 報酬 ${fmt(m.reward)} C-bills + サルベージ</div></div>
@@ -2104,6 +2205,7 @@ function openBrief(mi){
   $('#brDesc').textContent = m.briefing ||
     '作戦区域で敵部隊を確認。全段階の敵を撃破せよ。掃討確認後に味方が回収に向かう。';
   let waves='作戦規模: <b>'+t.stages+' 段階</b> / 敵総数 '+t.foes+' 機';
+  if(m.base) waves+='<br><span style="color:var(--cyan)">◎ 基地強襲 — 外縁に降着し、敵基地まで進攻して制圧せよ（広域マップ）</span>';
   if(t.structs){
     const names=Object.keys(t.structTypes).map(k=>STRUCTS[k].name+'×'+t.structTypes[k]).join('・');
     waves+='<br>破壊目標: <b style="color:var(--amber)">'+names+'</b>';
