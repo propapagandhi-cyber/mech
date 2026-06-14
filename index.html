@@ -200,6 +200,7 @@
   #fire2{right:150px; bottom:60px; width:78px; height:78px; font-size:12px;}
   #jet{right:64px; bottom:168px; width:72px; height:72px; font-size:12px; color:var(--cyan); border-color:#1e4458;}
   #cycle{right:176px; bottom:158px; width:64px; height:64px; font-size:11px; color:var(--cyan); border-color:#1e4458;}
+  #lockBtn{right:176px; bottom:64px; width:64px; height:64px; font-size:11px; color:var(--cyan); border-color:#1e4458;}
   #pauseBtn{left:50%; transform:translateX(-50%); top:14px; width:56px; height:42px; border-radius:8px; font-size:18px; letter-spacing:.1em;}
   #pauseBtn.press{transform:translateX(-50%) scale(.92);}
 
@@ -243,6 +244,7 @@
     #fire2{width:60px; height:60px; right:106px; bottom:34px; font-size:11px;}
     #jet{width:56px; height:56px; right:40px; bottom:116px;}
     #cycle{width:52px; height:52px; right:118px; bottom:110px; font-size:10px;}
+    #lockBtn{width:52px; height:52px; right:118px; bottom:34px; font-size:10px;}
     #lookzone{top:52px; bottom:160px;}
     .wrap{padding:28px 16px 60px;}
   }
@@ -277,6 +279,10 @@
       <div class="bar"><i id="structBar" style="background:#ff7a2f;"></i></div>
       <div style="margin-top:3px;"><span class="label">構造</span><span class="val" id="structTxt" style="font-size:12px;float:right;">100%</span></div>
       <div id="throttleRow"><span class="label">速度</span><span class="val" id="spdTxt" style="font-size:13px;">0</span></div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+        <canvas id="doll" width="58" height="74" style="flex:0 0 auto;"></canvas>
+        <div class="label" style="font-size:9px;line-height:1.4;opacity:.75;">部位装甲<br>頭/胴/腕/脚</div>
+      </div>
     </div>
 
     <div class="panel" id="heatBox">
@@ -292,11 +298,17 @@
     </div>
 
     <div class="panel" id="targetBox">
-      <div><span class="label">目標</span></div>
+      <div><span class="label">目標</span><span class="val" id="tLock" style="font-size:11px;float:right;color:#37d6ff;">—</span></div>
       <div class="val" id="tName" style="font-size:14px; margin:2px 0;">—</div>
-      <div class="stat">距離 <b id="tDist">—</b> m</div>
-      <div class="bar armor" style="margin-top:5px;"><i id="tArmor"></i></div>
-      <div class="stat" style="margin-top:3px;">残装甲 <b id="tArmorTxt">—</b></div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <canvas id="tDoll" width="50" height="64" style="flex:0 0 auto;"></canvas>
+        <div style="flex:1;">
+          <div class="stat">距離 <b id="tDist">—</b> m</div>
+          <div class="bar armor" style="margin-top:5px;"><i id="tArmor"></i></div>
+          <div class="stat" style="margin-top:3px;">残耐久 <b id="tArmorTxt">—</b></div>
+          <div class="stat" style="margin-top:2px;">被弾部位 <b id="tHit">—</b></div>
+        </div>
+      </div>
     </div>
 
     <div class="panel" id="radarBox">
@@ -317,6 +329,7 @@
     <div class="tbtn" id="fire2">射撃&nbsp;2</div>
     <div class="tbtn" id="jet">JET</div>
     <div class="tbtn" id="cycle">目標&nbsp;▸</div>
+    <div class="tbtn" id="lockBtn">ロック</div>
     <div class="tbtn" id="pauseBtn">❚❚</div>
   </div>
 
@@ -539,6 +552,108 @@ const CHASSIS = {
   dire:{id:'dire', name:'ダイアウルフ',cls:'強襲',  ton:88, slots:7, maxArmorBase:400, structure:240, speed:18, turn:0.8, baseCool:8,  cost:3400000, jet:0.35},
 };
 
+/* ---------- DATA: hit locations (本家メックウォーリア式の部位ダメージ) ----------
+   頭部 / 胴中央 / 左右胴 / 左右腕 / 左右脚 に装甲と内部構造を分配する。
+   armor/struct = 機体総量に対する配分比。 mult = 被弾倍率（頭部・胴中央は急所）。
+   lethal = この部位の内部構造が0になると撃破。 link = 側胴破壊で道連れになる腕。 leg = 脚部。 */
+const LOC_DEF = {
+  head:{jp:'頭部',   armor:0.05, struct:0.06, mult:1.7, lethal:true},
+  ct:  {jp:'胴中央', armor:0.20, struct:0.22, mult:1.05,lethal:true},
+  lt:  {jp:'左胴',   armor:0.13, struct:0.13, mult:1.0, link:'la'},
+  rt:  {jp:'右胴',   armor:0.13, struct:0.13, mult:1.0, link:'ra'},
+  la:  {jp:'左腕',   armor:0.11, struct:0.10, mult:1.0},
+  ra:  {jp:'右腕',   armor:0.11, struct:0.10, mult:1.0},
+  ll:  {jp:'左脚',   armor:0.135,struct:0.13, mult:1.0, leg:true},
+  rl:  {jp:'右脚',   armor:0.135,struct:0.13, mult:1.0, leg:true},
+};
+const LOC_ORDER  = ['head','ct','lt','rt','la','ra','ll','rl'];
+const LOC_WEIGHT = {head:3, ct:16, lt:14, rt:14, la:12, ra:12, ll:14, rl:14};  // 流れ弾・爆風の部位分布
+
+/* ---------- DATA: weapon hardpoints (兵装マウント — 腕・胴・肩) ---------- */
+const MOUNTS = { ra:{jp:'右腕'}, la:{jp:'左腕'}, rt:{jp:'右肩'}, lt:{jp:'左肩'} };
+const MOUNT_ORDER = ['ra','la','rt','lt'];
+function defaultMount(i){ return MOUNT_ORDER[i % MOUNT_ORDER.length]; }
+// muzzle offset (in camera right/up space) so each hardpoint fires from its own spot
+function mountOffset(m){
+  switch(m){
+    case 'ra': return {r: 4.2, u:-2.6};
+    case 'la': return {r:-4.2, u:-2.6};
+    case 'rt': return {r: 2.6, u: 1.6};   // 肩 = 高い位置
+    case 'lt': return {r:-2.6, u: 1.6};
+    default:   return {r: 0,   u:-2.0};
+  }
+}
+
+/* ---------- hit-location helpers ---------- */
+// build a fresh 部位 table from total armor + structure pools
+function makeLocations(totalArmor, totalStruct){
+  const loc={};
+  for(const k of LOC_ORDER){ const f=LOC_DEF[k];
+    const a=Math.round(totalArmor*f.armor), s=Math.max(1,Math.round(totalStruct*f.struct));
+    loc[k]={ a, maxA:a, s, maxS:s, dead:false };
+  }
+  return loc;
+}
+// classify an impact into a 部位 from its height + lateral offset (機体ローカル座標)
+function classifyLoc(up, side, scale){
+  const H=scale||1;
+  if(up > 26*H) return 'head';                       // cockpit band
+  if(up < 11*H) return side<0?'ll':'rl';             // legs
+  if(Math.abs(side) > 9*H) return side<0?'la':'ra';  // outboard = arms
+  if(side < -3*H) return 'lt';
+  if(side >  3*H) return 'rt';
+  return 'ct';                                        // centre mass
+}
+// where on an enemy a world-space impact landed (player is the shooter → use that axis for left/right)
+function enemyHitLoc(e, pt){
+  const sc=e.def.scale||1;
+  const up=pt.y - (e.pos.y||0);
+  const fx=player.pos.x-e.pos.x, fz=player.pos.z-e.pos.z, fl=Math.hypot(fx,fz)||1;
+  const rx=fz/fl, rz=-fx/fl;                       // right vector perpendicular to the firing line
+  const side=(pt.x-e.pos.x)*rx + (pt.z-e.pos.z)*rz;
+  return classifyLoc(up, side, sc);
+}
+// where on the player an incoming round landed
+function playerHitLoc(pt){
+  const up=pt.y - player.pos.y;
+  const rx=Math.cos(player.yaw), rz=-Math.sin(player.yaw);
+  const side=(pt.x-player.pos.x)*rx + (pt.z-player.pos.z)*rz;
+  return classifyLoc(up, side, 1);
+}
+// weighted-random 部位 (爆風・流れ弾用) — skips already-destroyed locations
+function randLoc(loc){
+  let tot=0; const live=[];
+  for(const k of LOC_ORDER){ if(loc && loc[k] && loc[k].dead) continue; live.push(k); tot+=LOC_WEIGHT[k]; }
+  if(!live.length) return 'ct';
+  let r=Math.random()*tot;
+  for(const k of live){ r-=LOC_WEIGHT[k]; if(r<=0) return k; }
+  return live[live.length-1];
+}
+// apply damage to one 部位: 装甲→内部構造、貫通分は胴中央へ。撃破/部位破壊を返す
+function damageLoc(unit, locId, rawDmg){
+  const loc=unit.loc;
+  if(!loc){ unit.hp-=rawDmg; return {killed:unit.hp<=0, destroyed:null, locId}; }
+  let L=loc[locId];
+  if(!L || L.dead){ locId='ct'; L=loc.ct; }       // hits on a blown-off section roll into the CT
+  const f=LOC_DEF[locId];
+  let dmg=rawDmg*(f.mult||1);
+  let killed=false, destroyed=null;
+  const ab=Math.min(L.a,dmg); L.a-=ab; dmg-=ab;    // armor layer absorbs first
+  if(dmg>0){
+    L.s-=dmg;
+    if(L.s<=0){
+      const over=-L.s; L.s=0; L.dead=true; destroyed=locId;
+      if(f.lethal){ killed=true; }
+      else {
+        if(f.link && loc[f.link] && !loc[f.link].dead){ loc[f.link].dead=true; loc[f.link].a=0; loc[f.link].s=0; } // 側胴が落ちると腕も道連れ
+        if(over>0){ loc.ct.s-=over; if(loc.ct.s<=0){ loc.ct.s=0; loc.ct.dead=true; killed=true; } } // 貫通は胴中央へ
+      }
+    }
+  }
+  unit.hp = LOC_ORDER.reduce((t,k)=>t+Math.max(0,loc[k].a)+Math.max(0,loc[k].s),0);  // 残HP = 全部位の装甲+構造
+  return {killed, destroyed, locId};
+}
+
 /* ---------- DATA: enemy templates ---------- */
 // move: movement personality — controls how much it circles vs. charges, and jump cadence.
 //   plodder  = slow straight advance, no jets (easy)   strafer = circle-strafe at range
@@ -687,7 +802,7 @@ const DEFAULT_SAVE = () => ({
   current:'cmd',
   // per-chassis state
   chassisState:{
-    cmd:{ loadout:[{id:'mdlas',grp:1},{id:'mdlas',grp:1},{id:'ac2',grp:2}], armorLv:0, coolLv:0, armor:120 },
+    cmd:{ loadout:[{id:'mdlas',grp:1,mount:'ra'},{id:'mdlas',grp:1,mount:'la'},{id:'ac2',grp:2,mount:'rt'}], armorLv:0, coolLv:0, armor:120 },
   },
   inventory:['smlas'],            // spare weapons not fitted
   unlockedMission:0,
@@ -731,7 +846,7 @@ function sanitizeSave(s){
     loadout = loadout
       .filter(w=>w && WEAPONS[w.id])
       .slice(0, ch.slots)
-      .map(w=>({id:w.id, grp:(w.grp===2?2:1)}));
+      .map((w,i)=>({id:w.id, grp:(w.grp===2?2:1), mount:(w.mount&&MOUNTS[w.mount])?w.mount:defaultMount(i)}));
     out.chassisState[id] = {
       loadout, armorLv, coolLv,
       armor: clamp(num(src.armor, maxA), 0, maxA),
@@ -740,7 +855,7 @@ function sanitizeSave(s){
   // make sure starter has a default loadout if totally empty everywhere
   if(out.chassisState.cmd && out.chassisState.cmd.loadout.length===0 && out.inventory.length===0
      && Object.values(out.chassisState).every(c=>c.loadout.length===0)){
-    out.chassisState.cmd.loadout = [{id:'mdlas',grp:1},{id:'mdlas',grp:1},{id:'ac2',grp:2}];
+    out.chassisState.cmd.loadout = [{id:'mdlas',grp:1,mount:'ra'},{id:'mdlas',grp:1,mount:'la'},{id:'ac2',grp:2,mount:'rt'}];
   }
   // stats
   const st = (s.stats&&typeof s.stats==='object')?s.stats:{};
@@ -831,6 +946,8 @@ const Audio = (()=>{
     hit:()=>noise(0.06,0.08),
     explode:()=>{noise(0.4,0.16); blip(90,0.4,'square',0.07);},
     warn:()=>blip(330,0.18,'square',0.05),
+    lockSeek:()=>blip(1180,0.04,'square',0.03),    // acquiring blip
+    lockOn:()=>{ blip(1760,0.07,'square',0.05); blip(2200,0.07,'square',0.04); }, // hard-lock chirp
     resume:()=>{ try{ ac().resume(); }catch(e){} },
     keepAlive,
   };
@@ -1261,8 +1378,11 @@ const player = {
   heat:0, maxHeat:100, cool:5,
   jet:1, jetMax:1, jetRate:0.35,
   chassis:null,
-  weapons:[],   // {def, grp, cd, ammo, maxAmmo}
+  weapons:[],   // {def, grp, mount, disabled, cd, ammo, maxAmmo}
   eye:9,
+  loc:null,     // per-部位 装甲/構造テーブル
+  legMul:1,     // 脚部損傷による速度低下係数
+  lastHit:null, lastHitT:0,
 };
 let enemies=[];        // {grp, def, pos, hp, maxhp, fireCd, vel, alive}
 let structures=[];     // {grp, def, type, pos, hp, maxhp, alive, isObjective, radius, aimY, height, fireCd}
@@ -1270,6 +1390,9 @@ let projectiles=[];    // {mesh, vel, dmg, range, traveled, owner, splash, homin
 let beams=[];          // transient hitscan beams {a,b,life,color}
 let laserSide=1;       // alternate left/right arm muzzle for beam visuals
 let mission=null, stageIdx=0, target=null, missionStartArmor=0, killsThisMission=0, dmgThisMission=0;
+// ---- lock-on (ロックオン) ----  state 0=なし 1=捕捉中 2=ロック確立
+let lockState=0, lockT=0, designated=null;
+const LOCK_TIME=0.45;
 let structKills=0, stageReinforced=false, stageEnding=false;
 const keys={};
 let invuln=0;
@@ -1300,10 +1423,41 @@ function buildPlayerFromSave(){
   player.cool=coolOf(id);
   player.jetMax=ch.jet; player.jet=ch.jet;
   player.maxHeat=100; player.heat=0;
-  player.weapons = cs.loadout.map(w=>{
+  player.weapons = cs.loadout.map((w,i)=>{
     const d=WEAPONS[w.id];
-    return {def:d, grp:w.grp||1, cd:0, ammo:d.ammo, maxAmmo:d.ammo};
+    return {def:d, grp:w.grp||1, mount:(w.mount&&MOUNTS[w.mount])?w.mount:defaultMount(i), cd:0, ammo:d.ammo, maxAmmo:d.ammo, disabled:false};
   });
+  // 部位テーブルを構築。装甲は持ち越しダメージ（cs.armor）に比例配分する
+  player.loc = makeLocations(player.maxArmor, player.maxStructure);
+  const armRatio = player.maxArmor>0 ? clamp(player.armor/player.maxArmor,0,1) : 1;
+  for(const k of LOC_ORDER) player.loc[k].a = Math.round(player.loc[k].maxA*armRatio);
+  player.maxArmor = LOC_ORDER.reduce((t,k)=>t+player.loc[k].maxA,0);
+  player.maxStructure = LOC_ORDER.reduce((t,k)=>t+player.loc[k].maxS,0);
+  player.legMul=1; player.lastHit=null; player.lastHitT=0;
+  syncPlayerAggregate(); refreshWeaponMounts();
+}
+// 部位テーブルから合計装甲・構造を再計算（上部HUDバー用）
+function syncPlayerAggregate(){
+  if(!player.loc) return;
+  player.armor     = LOC_ORDER.reduce((t,k)=>t+Math.max(0,player.loc[k].a),0);
+  player.structure = LOC_ORDER.reduce((t,k)=>t+Math.max(0,player.loc[k].s),0);
+}
+// マウント部位が破壊された兵装をオフラインにする
+function refreshWeaponMounts(){
+  if(!player.loc) return;
+  for(const w of player.weapons) w.disabled = !!(player.loc[w.mount] && player.loc[w.mount].dead);
+}
+function refreshLegMul(){
+  if(!player.loc){ player.legMul=1; return; }
+  const dead=['ll','rl'].filter(k=>player.loc[k] && player.loc[k].dead).length;
+  player.legMul = dead>=2 ? 0.3 : dead===1 ? 0.65 : 1;
+}
+// プレイヤー部位が破壊されたときの処理（脚→鈍足、腕/胴→兵装喪失）
+function onPlayerLocDestroyed(locId){
+  const f=LOC_DEF[locId]; if(!f) return;
+  if(f.leg){ refreshLegMul(); ticker(f.jp+' 大破 — 機動力低下'); Audio.warn(); }
+  else { refreshWeaponMounts(); ticker(f.jp+' 大破 — 兵装オフライン'); Audio.warn(); }
+  if(f.link && player.loc[f.link] && player.loc[f.link].dead) refreshWeaponMounts();
 }
 
 // Normalize either schema into a list of stages.
@@ -1359,7 +1513,11 @@ function spawnFoe(type, cx, cz, ang, dist){
   grp.position.copy(pos);
   scene.add(grp);
   const rnd=r=>r[0]+Math.random()*(r[1]-r[0]);
+  // 総耐久を装甲50% / 内部構造50% に分配して部位ダメージに対応（合計は従来どおり）
+  const totArmor=Math.round(f.structure*0.5), totStruct=f.structure-totArmor;
+  const loc=makeLocations(totArmor, totStruct);
   enemies.push({grp, def:f, type, pos, hp:f.structure, maxhp:f.structure, fireCd:1+Math.random(), alive:true,
+    loc, lastHit:null,
     vy:0, jumping:false, jetT:0,
     strafeDir:(Math.random()<0.5?1:-1),
     strafeCd:rnd(f.strafeCd||[1.5,3]),
@@ -1473,14 +1631,20 @@ function fireGroup(grp){
   let fired=false;
   const origin = camera.position.clone();
   const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
-  // gentle aim-assist: if a locked target sits near the crosshair, bias toward it
+  // aim-assist: when a target sits near the crosshair, converge toward it.
+  // a hard lock (ロック確立) pulls far harder and from a wider cone — this is what
+  // makes energy weapons reliable against foes on slopes.
   if(target && target.alive){
-    const tc=target.pos.clone(); tc.y = target.aimY!=null ? target.aimY : 20*(target.def.scale||1);
+    const tc=targetCenter(target);
     const td=tc.clone().sub(origin).normalize();
-    if(td.dot(dir) > 0.955) dir.lerp(td, 0.55).normalize();
+    const hard = lockState===2;
+    const thresh = hard ? 0.90 : 0.965;
+    const amt    = hard ? 0.85 : 0.5;
+    if(td.dot(dir) > thresh) dir.lerp(td, amt).normalize();
   }
   for(const w of player.weapons){
     if(w.grp!==grp || w.cd>0) continue;
+    if(player.loc && player.loc[w.mount] && player.loc[w.mount].dead) continue;  // 部位破壊で兵装喪失
     const d=w.def;
     if(d.ammo>0 && w.ammo<=0) continue;
     // heat gate: don't allow firing that would massively overheat? allow but warn
@@ -1494,26 +1658,27 @@ function fireGroup(grp){
 }
 function fireWeapon(w, origin, dir){
   const d=w.def;
-  const muzzle = origin.clone().add(dir.clone().multiplyScalar(4)); muzzle.y -= 1.2;
+  const _up=new THREE.Vector3(0,1,0), _rt=new THREE.Vector3().crossVectors(dir,_up).normalize();
+  const _off=mountOffset(w&&w.mount);
+  const muzzle = origin.clone().add(dir.clone().multiplyScalar(4)).addScaledVector(_rt,_off.r*0.6).addScaledVector(_up,_off.u*0.6-0.6);
   const heavy = d.dmg>=24;
   if(d.type==='energy' && d.proj===0){
-    // hitscan beam — start from an arm-mounted muzzle (offset from the eye),
-    // otherwise the beam is viewed end-on and reads as a dot, not a line
+    // hitscan beam — start from the weapon's hardpoint (腕/肩) so it reads as a line
     Audio.laser();
-    laserSide*=-1;
     const up=new THREE.Vector3(0,1,0);
     const right=new THREE.Vector3().crossVectors(dir,up).normalize();
+    const off=mountOffset(w.mount);
     const a=origin.clone().add(dir.clone().multiplyScalar(7))
-      .addScaledVector(right, laserSide*3.4).addScaledVector(up,-2.8);
+      .addScaledVector(right, off.r).addScaledVector(up, off.u);
     fxFlash(a, d.color, heavy?4:2.6);
-    const hit = raycastEnemies(origin, dir, d.range);
-    const end = origin.clone().add(dir.clone().multiplyScalar(hit?hit.dist:d.range));
+    const hit = raycastEnemies(origin, dir, d.range, true);   // energy = forgiving hitbox (斜面対策)
+    const end = hit ? hit.point.clone() : origin.clone().add(dir.clone().multiplyScalar(d.range));
     beams.push({a, b:end, life:0.16, color:d.color, w: heavy?5:3});
     if(hit){ damageAny(hit, d.dmg); fxSpark(end, d.color); fxFlash(end, d.color, 4); }
     addShake(heavy?0.28:0.1);
   } else if(d.type==='missile'){
-    // ripple fire — when an enemy is locked, ALL missiles (SRM含む) home toward it
-    const tgt = (target && target.alive) ? target : null;
+    // ripple fire — ミサイルは「ロック確立」中の目標にのみホーミングする（本家準拠）
+    const tgt = (lockState===2 && target && target.alive) ? target : null;
     const n = d.count||1;
     for(let i=0;i<n;i++) salvo.push({d, origin:origin.clone(), dir:dir.clone(), delay: i*0.05, homing:tgt});
     fxFlash(muzzle, 0xffd27a, 3);
@@ -1544,8 +1709,9 @@ function fireWeapon(w, origin, dir){
     }
   }
 }
-// hitscan against enemy spheres
-function raycastEnemies(origin, dir, range){
+// hitscan against enemy spheres.  forgiving=true (energy weapons) widens the
+// hitbox and tolerates grazing terrain so lasers connect against foes on slopes.
+function raycastEnemies(origin, dir, range, forgiving){
   let best=null;
   for(const e of enemies){
     if(!e.alive) continue;
@@ -1555,11 +1721,10 @@ function raycastEnemies(origin, dir, range){
     if(t<0 || t>range) continue;
     const closest = origin.clone().add(dir.clone().multiplyScalar(t));
     const dd = closest.distanceTo(c);
-    const rad = 12*e.def.scale;
+    const rad = (forgiving?17:12)*e.def.scale + (forgiving?Math.min(t*0.012,9):0); // grow with range
     if(dd<rad){
-      // obstacle occlusion check
-      if(blockedByObstacle(origin, c)) continue;
-      if(!best || t<best.dist) best={enemy:e, dist:t};
+      if(blockedByObstacle(origin, c, forgiving)) continue;
+      if(!best || t<best.dist) best={enemy:e, dist:t, point:closest.clone()};
     }
   }
   // facilities — vertical-cylinder-ish test (sphere at aim height)
@@ -1569,38 +1734,67 @@ function raycastEnemies(origin, dir, range){
     const t = c.clone().sub(origin).dot(dir);
     if(t<0 || t>range) continue;
     const closest = origin.clone().add(dir.clone().multiplyScalar(t));
-    if(closest.distanceTo(c) < s.radius){
-      if(blockedByObstacle(origin, c)) continue;
-      if(!best || t<best.dist) best={enemy:s, dist:t, struct:true};
+    if(closest.distanceTo(c) < s.radius + (forgiving?6:0)){
+      if(blockedByObstacle(origin, c, forgiving)) continue;
+      if(!best || t<best.dist) best={enemy:s, dist:t, struct:true, point:closest.clone()};
     }
   }
   return best;
 }
-function blockedByObstacle(a,b){
+function blockedByObstacle(a,b,forgiving){
   const dir=b.clone().sub(a); const len=dir.length(); dir.normalize();
-  // cheap march — blocked by a building footprint OR by intervening terrain (a hill)
+  // cheap march — blocked by a building footprint OR by intervening terrain (a hill).
+  // forgiving=true gives the line-of-fire vertical clearance and skips the segment ends,
+  // so a beam only grazing a slope between two mechs still counts as a clear shot.
+  const clear = forgiving ? 6 : 1.5;            // terrain must rise this far ABOVE the line to block
   const steps = Math.min(48, Math.ceil(len/14));
-  for(let i=1;i<steps;i++){
+  const i0 = forgiving ? 2 : 1, i1 = forgiving ? steps-1 : steps;
+  for(let i=i0;i<i1;i++){
     const p = a.clone().add(dir.clone().multiplyScalar(len*i/steps));
-    if(p.y < terrainHeightAt(p.x,p.z)) return true;        // a ridge masks the line of fire
+    if(p.y < terrainHeightAt(p.x,p.z) - clear) return true;   // a ridge masks the line of fire
     for(const o of obstacles){
       if(Math.abs(p.x-o.x)<o.hw && Math.abs(p.z-o.z)<o.hd && p.y < (o.top||80)) return true;
     }
   }
   return false;
 }
-// dispatch a hit to a foe or a facility (raycast result carries .struct)
-function damageAny(hit, dmg){ if(hit.struct) damageStruct(hit.enemy, dmg); else damageEnemy(hit.enemy, dmg); }
-function damageEnemy(e, dmg){
+// dispatch a hit to a foe or a facility (raycast result carries .struct + .point)
+function damageAny(hit, dmg){
+  if(hit.struct) damageStruct(hit.enemy, dmg);
+  else damageEnemy(hit.enemy, dmg, hit.point ? enemyHitLoc(hit.enemy, hit.point) : null);
+}
+// 敵の兵装は左右腕に搭載。腕が落ちると火力が減り、両腕喪失で沈黙する
+function enemyWeaponMul(e){
+  if(!e.loc) return 1;
+  const alive=['ra','la'].filter(k=>e.loc[k] && !e.loc[k].dead).length;
+  return alive/2;
+}
+function enemyLegMul(e){
+  if(!e.loc) return 1;
+  const dead=['ll','rl'].filter(k=>e.loc[k] && e.loc[k].dead).length;
+  return dead>=2 ? 0.3 : dead===1 ? 0.6 : 1;
+}
+function onEnemyLocDestroyed(e, locId){
+  const c=e.pos.clone(); c.y=(e.pos.y||0)+ (LOC_DEF[locId]&&LOC_DEF[locId].leg?6:20)*(e.def.scale||1);
+  fxSpark(c, 0xffd27a); fxFlash(c, 0xffaa55, 4*(e.def.scale||1));
+  spawnDebris(c, e.def.color, 3);
+}
+function damageEnemy(e, dmg, locId){
   if(!e.alive) return;
-  e.hp -= dmg; Audio.hit();
-  // hit spark
-  flashMesh(e.grp);
-  if(e.hp<=0){
+  Audio.hit(); flashMesh(e.grp);
+  let killed=false;
+  if(e.loc){
+    if(!locId) locId = randLoc(e.loc);
+    const r=damageLoc(e, locId, dmg);
+    killed = r.killed;
+    if(e===target) e.lastHit=r.locId;
+    if(r.destroyed) onEnemyLocDestroyed(e, r.destroyed);
+  } else { e.hp-=dmg; killed=e.hp<=0; }
+  if(killed || e.hp<=0){
     e.alive=false; scene.remove(e.grp);
     killsThisMission++; SAVE.stats.kills++;
     Audio.explode();
-    if(target===e) target=null;
+    if(target===e){ target=null; lockState=0; }
     mechDeath(e);
     objectiveTicker();
     checkStageClear();
@@ -1613,7 +1807,7 @@ function damageStruct(s, dmg){
   if(s.hp<=0){
     s.alive=false; scene.remove(s.grp);
     structKills++;
-    if(target===s) target=null;
+    if(target===s){ target=null; lockState=0; }
     structDeath(s);
     // first facility down → defenders counter-attack (skip if the stage is ending)
     const st=mission && mission._stages[stageIdx];
@@ -1784,7 +1978,7 @@ function launchMissile(s){
   Audio.launch(); addShake(0.18);
 }
 
-function enemyFire(e){
+function enemyFire(e, wmul){
   const from = e.pos.clone(); from.y=(e.pos.y||0)+20*e.def.scale;
   const to = player.pos.clone(); to.y=player.eye;
   if(blockedByObstacle(from,to)) return;
@@ -1793,17 +1987,27 @@ function enemyFire(e){
   dir.x += (Math.random()-0.5)*0.04; dir.z += (Math.random()-0.5)*0.04; dir.normalize();
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(1.3,6,6), new THREE.MeshBasicMaterial({color:e.def.color}));
   mesh.position.copy(from); scene.add(mesh);
-  projectiles.push({mesh, vel:dir.multiplyScalar(220), dmg:e.def.dmg, range:e.def.range+120, traveled:0, owner:'enemy', splash:0, color:e.def.color});
+  const dmg = Math.round(e.def.dmg * (0.5 + 0.5*(wmul==null?1:wmul)));   // 片腕で半減
+  projectiles.push({mesh, vel:dir.multiplyScalar(220), dmg, range:e.def.range+120, traveled:0, owner:'enemy', splash:0, color:e.def.color});
   Audio.cannon();
 }
-function hurtPlayer(dmg){
+function hurtPlayer(dmg, locId){
   if(invuln>0) return;
-  player.armor -= dmg;
-  if(player.armor<0){ player.structure += player.armor; player.armor=0; }
   dmgThisMission += dmg; SAVE.stats.damage += dmg;
-  damageFlash();
-  Audio.hit();
-  if(player.structure<=0){ player.structure=0; loseMission(); }
+  damageFlash(); Audio.hit();
+  if(player.loc){
+    if(!locId) locId = randLoc(player.loc);
+    const r=damageLoc(player, locId, dmg);
+    syncPlayerAggregate();
+    player.lastHit=r.locId; player.lastHitT=1.2;
+    if(r.destroyed) onPlayerLocDestroyed(r.destroyed);
+    if(r.killed || player.loc.ct.dead || player.loc.head.dead){ player.structure=0; loseMission(); return; }
+    if(player.structure<=0){ player.structure=0; loseMission(); }
+  } else {
+    player.armor -= dmg;
+    if(player.armor<0){ player.structure += player.armor; player.armor=0; }
+    if(player.structure<=0){ player.structure=0; loseMission(); }
+  }
 }
 function damageFlash(){ const f=$('#flash'); f.style.opacity='0.5'; setTimeout(()=>f.style.opacity='0',120); }
 
@@ -1836,7 +2040,7 @@ function update(dt){
   // forward dir in XZ (yaw 0 => -Z)
   const fx = -sinY, fz = -cosY;
   const rx = cosY, rz = -sinY;
-  const sp = ch.speed;
+  const sp = ch.speed * (player.legMul||1);   // 脚部損傷で減速
   const desired = new THREE.Vector3(
     (fx*fwd + rx*strafe)*sp,
     0,
@@ -1905,8 +2109,8 @@ function update(dt){
   // ---- sustained fire (hold trigger) ----
   if(!shutdown){ if(fireHeld[1]) fireGroup(1); if(fireHeld[2]) fireGroup(2); }
 
-  // ---- targeting auto-pick if none ----
-  if(!target || !target.alive) pickTarget();
+  // ---- targeting / lock-on ----
+  updateLock(dt);
 
   // ---- enemies ----
   const rndR=r=>r[0]+Math.random()*(r[1]-r[0]);
@@ -1972,7 +2176,7 @@ function update(dt){
 
     // ---- horizontal move with wall-sliding; high jumps clear short buildings ----
     const prevX=e.pos.x, prevZ=e.pos.z;
-    const step = mv.multiplyScalar(f.speed*speedMul*dt);
+    const step = mv.multiplyScalar(f.speed*speedMul*enemyLegMul(e)*dt);
     const nx = clamp(e.pos.x+step.x,-ARENA,ARENA);
     const nz = clamp(e.pos.z+step.z,-ARENA,ARENA);
     const blocker = (x,z)=>{ for(const o of obstacles){ if(Math.abs(x-o.x)<o.hw && Math.abs(z-o.z)<o.hd && e.pos.y<(o.top||80)-4) return o; } return null; };
@@ -2006,10 +2210,11 @@ function update(dt){
     else e.grp.rotation.y=aimYaw;
     // legs tuck (lean back) while airborne for a jump-jet silhouette
     if(ud && ud.legsG) ud.legsG.rotation.x = lerpAngle(ud.legsG.rotation.x||0, airborne?-0.5:0, Math.min(1,dt*5));
-    // fire
+    // fire — 火力は健在な兵装腕に比例。両腕喪失で射撃不能
     e.fireCd -= dt;
-    if(e.fireCd<=0 && distP < f.range){
-      enemyFire(e); e.fireCd = f.fireCd*(0.8+Math.random()*0.6);
+    const wmul=enemyWeaponMul(e);
+    if(e.fireCd<=0 && distP < f.range && wmul>0){
+      enemyFire(e, wmul); e.fireCd = f.fireCd*(0.8+Math.random()*0.6);
     }
   }
 
@@ -2063,7 +2268,7 @@ function update(dt){
           const c=e.pos.clone(); c.y=(e.pos.y||0)+20*e.def.scale;
           const hitR = Math.max(p.proxR||0, 12*e.def.scale);   // missiles get a wider detonation radius
           if(p.mesh.position.distanceTo(c) < hitR){
-            damageEnemy(e, p.dmg);
+            damageEnemy(e, p.dmg, enemyHitLoc(e, p.mesh.position));
             if(p.splash){ const sr=p.splashR||40; for(const e2 of enemies){ if(e2!==e&&e2.alive){ const c2=e2.pos.clone(); c2.y=(e2.pos.y||0)+20; if(p.mesh.position.distanceTo(c2)<sr) damageEnemy(e2,p.splash);} } }
             fxSpark(p.mesh.position, p.color); directHit=true; dead=true; break;
           }
@@ -2079,7 +2284,7 @@ function update(dt){
         }
       } else {
         const c=player.pos.clone(); c.y=player.eye;
-        if(p.mesh.position.distanceTo(c) < 11){ hurtPlayer(p.dmg); fxSpark(p.mesh.position, p.color); dead=true; }
+        if(p.mesh.position.distanceTo(c) < 11){ hurtPlayer(p.dmg, playerHitLoc(p.mesh.position)); fxSpark(p.mesh.position, p.color); dead=true; }
       }
     }
     if(dead){
@@ -2124,6 +2329,7 @@ function update(dt){
     if(k>=1){ scene.remove(f.mesh); f.mesh.material.dispose(); pfx.splice(i,1); } }
 
   if(invuln>0) invuln-=dt;
+  if(player.lastHitT>0){ player.lastHitT-=dt; if(player.lastHitT<=0) player.lastHit=null; }
 
   updateHUD();
 }
@@ -2131,6 +2337,12 @@ function update(dt){
 // all lockable contacts: live foes first, then alive objective facilities
 function targetList(){
   return enemies.filter(e=>e.alive).concat(structures.filter(s=>s.alive && s.isObjective));
+}
+// world-space aim point of a contact (foe centre of mass / facility aim height)
+function targetCenter(t){
+  const c=t.pos.clone();
+  c.y = t.aimY!=null ? t.aimY : (t.pos.y||0)+20*((t.def&&t.def.scale)||1);
+  return c;
 }
 function pickTarget(){
   let best=null, bestScore=1e9;
@@ -2144,9 +2356,44 @@ function pickTarget(){
   }
   target=best;
 }
+// the contact sitting nearest the crosshair (within a forward cone) — the lock candidate
+function aimDesignate(){
+  const dir=new THREE.Vector3(); camera.getWorldDirection(dir);
+  const o=camera.position;
+  let best=null, bestDot=0.95;               // ~18° acquisition cone
+  for(const e of targetList()){
+    const to=targetCenter(e).sub(o); const dist=to.length();
+    if(dist>1600) continue;
+    const dot=to.normalize().dot(dir);
+    if(dot>bestDot){ bestDot=dot; best=e; }
+  }
+  designated=best;
+}
+// per-frame lock maintenance: acquire over LOCK_TIME, hold a hard lock through a wide cone.
+// Auto-acquires whatever sits under the crosshair so missiles home without fuss; the
+// lock key (E) just force-grabs the designated contact or drops an established lock.
+function updateLock(dt){
+  aimDesignate();
+  // crosshair priority: putting the reticle on a new contact starts acquiring it
+  if(designated && designated!==target){ target=designated; lockState=1; lockT=0; Audio.lockSeek(); }
+  if(lockState>0){
+    if(!target || !target.alive){ lockState=0; }
+    else if(lockState===1){
+      lockT+=dt; if((lockT*1000|0)%90<20) Audio.lockSeek();
+      if(lockT>=LOCK_TIME){ lockState=2; Audio.lockOn(); bigMsg('ロックオン'); }   // → 確立。以後は照準を外しても維持
+    }
+  }
+  if((!target || !target.alive) && lockState===0) pickTarget();   // keep a soft target for the HUD
+}
+// E / ロックボタン: 照準下（または現在の目標）を即座にハードロック（捕捉待ち時間を省略）
+function toggleLock(){
+  const t = (designated && designated.alive) ? designated : target;
+  if(t && t.alive){ target=t; lockState=2; lockT=LOCK_TIME; Audio.lockOn(); bigMsg('ロックオン'); }
+}
 function cycleTarget(){
-  const live=targetList(); if(!live.length){target=null;return;}
+  const live=targetList(); if(!live.length){target=null;lockState=0;return;}
   let idx=live.indexOf(target); idx=(idx+1)%live.length; target=live[idx];
+  lockState=1; lockT=0;                      // cycling re-acquires the new contact
 }
 
 /* ============================================================
@@ -2164,17 +2411,22 @@ function updateHUD(){
   $('#heatTxt').style.color = hp>=85?'var(--red)':'var(--phos)';
   const jp=player.jet/player.jetMax*100; $('#jetBar').style.width=jp+'%'; $('#jetTxt').textContent=Math.round(jp)+'%';
 
-  // weapon list
+  // weapon list (マウント部位 + オフライン表示)
   const wl=$('#weaponList'); wl.innerHTML='';
   for(const w of player.weapons){
     const d=w.def;
     const row=document.createElement('div');
-    let cls='wpn'; if(w.cd>0) cls+=' cool'; if(d.ammo>0 && w.ammo<=0) cls+=' empty';
+    let cls='wpn'; if(w.cd>0) cls+=' cool'; if((d.ammo>0 && w.ammo<=0)||w.disabled) cls+=' empty';
     row.className=cls;
-    const ammo = d.ammo>0 ? `<span class="am">${w.ammo}</span>` : `<span class="am">∞</span>`;
-    row.innerHTML=`<span class="grp">${w.grp}</span><span class="nm">${d.name}</span>${ammo}`;
+    const ammo = w.disabled ? `<span class="am" style="color:#ff5a50;">破壊</span>`
+               : d.ammo>0 ? `<span class="am">${w.ammo}</span>` : `<span class="am">∞</span>`;
+    const mt = MOUNTS[w.mount] ? `<span class="am" style="opacity:.6;font-size:9px;">${MOUNTS[w.mount].jp}</span>` : '';
+    row.innerHTML=`<span class="grp">${w.grp}</span><span class="nm">${d.name}</span>${mt}${ammo}`;
     wl.appendChild(row);
   }
+
+  // own mech paper-doll
+  drawDoll($('#doll'), player.loc, player.lastHit);
 
   // target panel
   if(target && target.alive){
@@ -2183,10 +2435,44 @@ function updateHUD(){
     const dist=Math.round(player.pos.distanceTo(target.pos));
     $('#tDist').textContent=dist;
     const ta=target.hp/target.maxhp*100; $('#tArmor').style.width=ta+'%'; $('#tArmorTxt').textContent=Math.round(ta)+'%';
+    const lk=$('#tLock');
+    if(target===designated && lockState===0){ lk.textContent='照準'; lk.style.color='#9af'; }
+    else if(lockState===1){ lk.textContent='捕捉中…'; lk.style.color='#ffb000'; }
+    else if(lockState===2){ lk.textContent='● ロック'; lk.style.color='#37d6ff'; }
+    else { lk.textContent='—'; lk.style.color='#5e7a64'; }
+    $('#tHit').textContent = (target.lastHit && LOC_DEF[target.lastHit]) ? LOC_DEF[target.lastHit].jp : '—';
+    drawDoll($('#tDoll'), target.loc, target.lastHit);
   } else $('#targetBox').classList.remove('on');
 
   drawOverlay();
   drawRadar();
+}
+// 8部位パネル: 装甲残量を色で示し、破壊部位は赤、直近被弾は白枠
+function drawDoll(cv, loc, lastHit){
+  if(!cv) return;
+  const ctx=cv.getContext('2d'); const W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  if(!loc){ return; }
+  const sx=W/58, sy=H/74;
+  // [x,y,w,h] レイアウト（58x74基準）— 頭/左右胴/胴中央/左右腕/左右脚
+  const R={
+    head:[23,1,12,11], lt:[18,14,8,22], ct:[27,14,8,26], rt:[36,14,8,22],
+    la:[6,16,10,22], ra:[44,16,10,22], ll:[20,42,8,28], rl:[30,42,8,28],
+  };
+  for(const k of LOC_ORDER){
+    const r=R[k]; if(!r) continue;
+    const L=loc[k];
+    const frac = L.maxA>0 ? clamp(L.a/L.maxA,0,1) : 0;
+    let col;
+    if(L.dead) col='#5a1212';
+    else if(L.a<=0) col='#ff7a2f';                                   // 装甲剥離→構造露出
+    else col = frac>0.6 ? '#3dff7a' : frac>0.3 ? '#ffd23a' : '#ff6a3a';
+    ctx.fillStyle=col;
+    ctx.fillRect(r[0]*sx, r[1]*sy, r[2]*sx, r[3]*sy);
+    ctx.strokeStyle = (k===lastHit) ? '#ffffff' : 'rgba(0,0,0,.5)';
+    ctx.lineWidth = (k===lastHit) ? 2 : 1;
+    ctx.strokeRect(r[0]*sx, r[1]*sy, r[2]*sx, r[3]*sy);
+  }
 }
 
 function drawOverlay(){
@@ -2203,24 +2489,46 @@ function drawOverlay(){
       ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(e.x,e.y); ctx.stroke();
       ctx.restore(); }
   }
-  // target reticle box + leads on all enemies
+  // target reticle box + lock-on visuals on all enemies
+  const blink = (performance.now()%400)<240;
   for(const en of enemies){ if(!en.alive) continue;
     const c=en.pos.clone(); c.y=(en.pos.y||0)+20*en.def.scale; const s=worldToScreen(c);
     if(!s) continue;
     const isT = en===target;
+    const isD = en===designated;
     const r = clamp(2400/s.z, 14, 90);
-    ctx.strokeStyle = isT? '#37d6ff' : 'rgba(255,90,80,.55)';
-    ctx.lineWidth = isT?2:1;
-    const len=r*0.4;
-    // corner brackets
     const x0=s.x-r,y0=s.y-r,x1=s.x+r,y1=s.y+r;
-    ctx.beginPath();
-    ctx.moveTo(x0,y0+len);ctx.lineTo(x0,y0);ctx.lineTo(x0+len,y0);
-    ctx.moveTo(x1-len,y0);ctx.lineTo(x1,y0);ctx.lineTo(x1,y0+len);
-    ctx.moveTo(x1,y1-len);ctx.lineTo(x1,y1);ctx.lineTo(x1-len,y1);
-    ctx.moveTo(x0+len,y1);ctx.lineTo(x0,y1);ctx.lineTo(x0,y1-len);
-    ctx.stroke();
-    if(isT){ ctx.fillStyle='#37d6ff'; ctx.font='11px Orbitron, monospace'; ctx.fillText(en.def.name.toUpperCase(), x0, y0-6); }
+    if(isT && lockState===2){
+      // hard lock — solid cyan box + spinning lock ring + label
+      ctx.save(); ctx.strokeStyle='#37d6ff'; ctx.lineWidth=2.4;
+      ctx.strokeRect(x0,y0,r*2,r*2);
+      const a=performance.now()/200;
+      ctx.beginPath(); ctx.arc(s.x,s.y,r*1.18, a, a+Math.PI*0.5); ctx.stroke();
+      ctx.beginPath(); ctx.arc(s.x,s.y,r*1.18, a+Math.PI, a+Math.PI*1.5); ctx.stroke();
+      ctx.fillStyle='#37d6ff'; ctx.font='11px Orbitron, monospace';
+      ctx.fillText('● ロック '+en.def.name.toUpperCase(), x0, y0-6);
+      ctx.restore();
+    } else {
+      // acquiring (yellow, blinking) / soft target (cyan brackets) / others (faint red)
+      const acquiring = isT && lockState===1;
+      ctx.strokeStyle = acquiring ? (blink?'#ffd23a':'rgba(255,210,58,.35)')
+                       : isT ? '#37d6ff'
+                       : isD ? 'rgba(255,255,255,.7)' : 'rgba(255,90,80,.55)';
+      ctx.lineWidth = (isT||isD)?2:1;
+      const len=r*0.4;
+      ctx.beginPath();
+      ctx.moveTo(x0,y0+len);ctx.lineTo(x0,y0);ctx.lineTo(x0+len,y0);
+      ctx.moveTo(x1-len,y0);ctx.lineTo(x1,y0);ctx.lineTo(x1,y0+len);
+      ctx.moveTo(x1,y1-len);ctx.lineTo(x1,y1);ctx.lineTo(x1-len,y1);
+      ctx.moveTo(x0+len,y1);ctx.lineTo(x0,y1);ctx.lineTo(x0,y1-len);
+      ctx.stroke();
+      if(acquiring){   // shrinking acquisition ring
+        const k=clamp(lockT/LOCK_TIME,0,1);
+        ctx.strokeStyle='#ffd23a'; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.arc(s.x,s.y, r*(1.6-0.6*k), 0, Math.PI*2); ctx.stroke();
+      }
+      if(isT){ ctx.fillStyle='#37d6ff'; ctx.font='11px Orbitron, monospace'; ctx.fillText(en.def.name.toUpperCase(), x0, y0-6); }
+    }
   }
   // objective facilities — amber diamond markers + off-screen guidance arrows
   for(const st of structures){ if(!st.alive || !st.isObjective) continue;
@@ -2466,9 +2774,13 @@ function renderLoadout(){
       const gbtn=document.createElement('button'); gbtn.className='mini grp'; gbtn.textContent='G'+(w.grp||1);
       gbtn.title='トリガーグループ切替';
       gbtn.onclick=()=>{ w.grp = (w.grp===1?2:1); persist(); renderLoadout(); };
+      const cur=(w.mount&&MOUNTS[w.mount])?w.mount:defaultMount(i);
+      const mbtn=document.createElement('button'); mbtn.className='mini grp'; mbtn.textContent=MOUNTS[cur].jp;
+      mbtn.title='搭載ハードポイント切替（腕／肩）';
+      mbtn.onclick=()=>{ const ni=(MOUNT_ORDER.indexOf(cur)+1)%MOUNT_ORDER.length; w.mount=MOUNT_ORDER[ni]; persist(); renderLoadout(); };
       const rm=document.createElement('button'); rm.className='mini rm'; rm.textContent='外す';
       rm.onclick=()=>{ SAVE.inventory.push(w.id); cs.loadout.splice(i,1); persist(); renderLab(); };
-      line.appendChild(gbtn); line.appendChild(rm);
+      line.appendChild(gbtn); line.appendChild(mbtn); line.appendChild(rm);
     } else {
       line.className='slotline free';
       line.innerHTML=`<span class="tag" style="border:1px dashed #2a3a2d;color:#5e7a64;">スロット ${i+1}</span><div class="nm2"><div class="d">空きハードポイント</div></div>`;
@@ -2506,7 +2818,7 @@ function renderArsenalList(targetEl, forFitting){
     else if(!tonOk) fit.title='トン数超過';
     fit.onclick=()=>{
       const idx=SAVE.inventory.indexOf(wid); if(idx>=0) SAVE.inventory.splice(idx,1);
-      cs.loadout.push({id:wid, grp: d.type==='energy'?1:2});
+      cs.loadout.push({id:wid, grp: d.type==='energy'?1:2, mount: defaultMount(cs.loadout.length)});
       persist(); renderLab();
     };
     line.appendChild(fit); targetEl.appendChild(line);
@@ -2609,6 +2921,7 @@ function initInput(){
       if(k==='1'){ fireHeld[1]=true; }
       if(k==='2'){ fireHeld[2]=true; }
       if(k==='r'||k==='tab'){ cycleTarget(); }
+      if(k==='e'||k==='f'||k==='q'){ toggleLock(); }   // ロックオン
       if(k==='escape'){ pauseGame(); }
       // toggle the diagnostic readout with the backquote key
       if(k==='`'){ window._gpDebugForce=!window._gpDebugForce; }
@@ -2686,6 +2999,7 @@ function initTouch(){
   const tap=(el,fn)=>{ el.addEventListener('touchstart',e=>{e.preventDefault(); press(el,true); fn();},{passive:false});
     const up=()=>press(el,false); el.addEventListener('touchend',up); el.addEventListener('touchcancel',up); };
   tap($('#cycle'), cycleTarget);
+  tap($('#lockBtn'), toggleLock);
   tap($('#pauseBtn'), pauseGame);
 }
 
@@ -2736,6 +3050,7 @@ function pollGamepad(dt){
     gpFresh(btn,'cycleY',3,cycleTarget);
     gpFresh(btn,'cycleX',2,cycleTarget);
     gpFresh(btn,'stickR',11,cycleTarget);
+    gpFresh(btn,'lockL',10,toggleLock);     // L3押し込みでロックオン
     gpFresh(btn,'pause',9,pauseGame);
     gpFresh(btn,'pause2',8,pauseGame);
   } else {
@@ -2914,9 +3229,10 @@ function renderKeys(){
     ['右クリック / 2','トリガーグループ2で射撃'],
     ['Space','ジャンプジェット'],
     ['R / Tab','目標切替'],
+    ['E / Q / F','ロックオン（照準下の敵を捕捉）'],
     ['Esc','一時停止 / 設定'],
   ];
-  const tm = isTouch? [['左スティック','移動'],['右側ドラッグ','視点・照準'],['射撃 1 / 射撃 2','武器グループ（長押し）'],['JET','ジャンプジェット（長押し）'],['目標 ▸','目標切替'],['❚❚','一時停止 / メニュー']] : rows;
+  const tm = isTouch? [['左スティック','移動'],['右側ドラッグ','視点・照準'],['射撃 1 / 射撃 2','武器グループ（長押し）'],['JET','ジャンプジェット（長押し）'],['目標 ▸','目標切替'],['ロック','ロックオン'],['❚❚','一時停止 / メニュー']] : rows;
   const gpRows=[
     ['左スティック / 十字','移動 / 横移動'],
     ['右スティック','視点・照準'],
@@ -2924,6 +3240,7 @@ function renderKeys(){
     ['ZL / L','トリガーグループ2で射撃'],
     ['A / B','ジャンプジェット'],
     ['X / Y','目標切替'],
+    ['左スティック押込','ロックオン'],
     ['＋ / －','一時停止 / メニュー'],
   ];
   const list = gpConnected ? gpRows : (isTouch?tm:rows);
