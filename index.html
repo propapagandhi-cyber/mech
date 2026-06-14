@@ -909,24 +909,25 @@ function initThree(){
   renderer = new THREE.WebGLRenderer({canvas:cv, antialias:true, powerPreference:'high-performance'});
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0a1410);
-  scene.fog = new THREE.Fog(0x0a1410, 500, 2400);
+  // dusty Martian sky — butterscotch haze fading to a rust horizon
+  scene.background = new THREE.Color(0x2a160e);
+  scene.fog = new THREE.Fog(0x3a2014, 600, 2600);
 
   camera = new THREE.PerspectiveCamera(72, 1, 0.5, 4200);
 
-  const hemi = new THREE.HemisphereLight(0x9fc6ff, 0x20301c, 0.75); scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff0d0, 0.9); sun.position.set(-300,500,200); scene.add(sun);
+  const hemi = new THREE.HemisphereLight(0xe8b079, 0x3a1c10, 0.85); scene.add(hemi);   // pink sky / red ground bounce
+  const sun = new THREE.DirectionalLight(0xffd8a0, 0.95); sun.position.set(-300,500,200); scene.add(sun);
 
   initTextures();
-  // ground
+  // ground (backdrop beneath the displaced terrain — Martian regolith tint)
   const gtex=TEX.ground; gtex.repeat.set(26,26);
   const groundGeo = new THREE.PlaneGeometry(ARENA*2.4, ARENA*2.4, 1,1);
-  const groundMat = new THREE.MeshStandardMaterial({color:0x8fa394, map:gtex, roughness:1, metalness:0});
-  const ground = new THREE.Mesh(groundGeo, groundMat); ground.rotation.x=-Math.PI/2; scene.add(ground);
+  const groundMat = new THREE.MeshStandardMaterial({color:0xa5613b, map:gtex, roughness:1, metalness:0});
+  const ground = new THREE.Mesh(groundGeo, groundMat); ground.rotation.x=-Math.PI/2; ground.position.y=-1.5; scene.add(ground);
 
-  // grid
-  const grid = new THREE.GridHelper(ARENA*2.4, 60, 0x2f6b46, 0x18351f);
-  grid.material.opacity=0.5; grid.material.transparent=true; grid.position.y=0.1; scene.add(grid);
+  // grid — faint surveyor lines, dusty amber
+  const grid = new THREE.GridHelper(ARENA*2.4, 60, 0x7a4a2e, 0x4a2a18);
+  grid.material.opacity=0.28; grid.material.transparent=true; grid.position.y=0.06; scene.add(grid);
 
   buildArena();
   clock = new THREE.Clock();
@@ -979,22 +980,24 @@ function terrainHeightAt(x,z){
 // elevation: grass → rock → snow). Disposes any previous mission's mesh.
 function buildTerrainMesh(){
   if(terrainMesh){ scene.remove(terrainMesh); terrainMesh.geometry.dispose(); terrainMesh.material.dispose(); terrainMesh=null; }
-  const SIZE=ARENA*2.4, SEG=120;
+  const SIZE=ARENA*2.4, SEG=100;
   const geo=new THREE.PlaneGeometry(SIZE,SIZE,SEG,SEG);
   geo.rotateX(-Math.PI/2);                              // lay flat in XZ; +y is up
   const pos=geo.attributes.position;
   const col=new Float32Array(pos.count*3);
-  const cGrass=new THREE.Color(0x415e39), cDirt=new THREE.Color(0x5b6243),
-        cRock=new THREE.Color(0x6e7468),  cSnow=new THREE.Color(0xdfe9e2);
+  // Martian palette: rusty regolith on the flats → darker basalt rock → pale dust peaks
+  const cSand=new THREE.Color(0x9c5733), cOchre=new THREE.Color(0xb07444),
+        cRock=new THREE.Color(0x6e4636), cPale=new THREE.Color(0xc7a784);
   const tmp=new THREE.Color();
   for(let i=0;i<pos.count;i++){
     const x=pos.getX(i), z=pos.getZ(i);
     const y=terrainHeightAt(x,z);
     pos.setY(i,y);
-    // colour ramp by height
-    if(y<22)        tmp.copy(cGrass).lerp(cDirt, clamp(y/22,0,1));
-    else if(y<120)  tmp.copy(cDirt).lerp(cRock, clamp((y-22)/98,0,1));
-    else            tmp.copy(cRock).lerp(cSnow, clamp((y-120)/110,0,1));
+    // colour ramp by elevation
+    if(y<26)        tmp.copy(cSand).lerp(cOchre, clamp(y/26,0,1));
+    else if(y<130)  tmp.copy(cOchre).lerp(cRock, clamp((y-26)/104,0,1));
+    else            tmp.copy(cRock).lerp(cPale, clamp((y-130)/110,0,1));
+    tmp.offsetHSL(0,0,(Math.random()-0.5)*0.03);        // subtle regolith mottling
     col[i*3]=tmp.r; col[i*3+1]=tmp.g; col[i*3+2]=tmp.b;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(col,3));
@@ -1005,9 +1008,11 @@ function buildTerrainMesh(){
 
 // Rebuild the battlefield. `clear` is a list of {x,z,r} keep-out zones
 // (player deploy, enemy base, the approach corridor) so nothing spawns on top
-// of them and the route to the base stays passable.
-function buildArena(clear){
+// of them and the route to the base stays passable. `opt` carries the deploy /
+// base points so the colony districts can be laid out sensibly between them.
+function buildArena(clear, opt){
   clear = clear || [{x:0,z:0,r:150}];
+  opt = opt || {};
   const blocked=(x,z,pad)=>clear.some(c=>Math.hypot(x-c.x,z-c.z) < c.r+(pad||0));
   // clear old obstacles + terrain (dispose per-mission GPU resources, but keep the
   // shared base textures in TEX intact for the next rebuild)
@@ -1023,49 +1028,84 @@ function buildArena(clear){
   });
   obstacles=[];
   mountains=[];
-  // ---- mountains (山岳地形): gentle, climbable rises in the height-field ----
-  // Wide radii vs. modest heights keep slopes shallow enough for mechs to walk
-  // up; per-hill angular ridges (k,phase,amp) make the relief uneven, not conical.
+  // ---- mountains (火星の山岳): broad, shield-like ranges on the outskirts ----
+  // Real Martian relief is wide and gently sloped, not spiky. Hills are grouped
+  // into ridge lines (ranges) out toward the map edge, with height tied to radius
+  // so every slope stays shallow enough to walk up (max grade ≈ π·slope/2).
   terrainBumps=[];
   terrainSeed=Math.random()*1000;
-  const mCount = 14;
-  for(let i=0;i<mCount;i++){
-    let x,z,tries=0;
-    do{ x=(Math.random()*2-1)*ARENA*0.92; z=(Math.random()*2-1)*ARENA*0.92; tries++; }
-    while((blocked(x,z,200) || Math.hypot(x,z)<ARENA*0.18) && tries<40);
-    if(tries>=40) continue;
-    const r = 380+Math.random()*260;            // broad footprint → gentle grade
-    const h = 90+Math.random()*150;             // modest height so the climb is fair
-    terrainBumps.push({x, z, r, h,
-      k: 3+((Math.random()*4)|0),               // 3–6 fold ridge pattern
-      phase: Math.random()*Math.PI*2,
-      amp: 0.12+Math.random()*0.16});           // ridge unevenness
-    mountains.push({x, z, r:r*0.55, h});        // radar footprint (visual core)
+  const addHill=(x,z,r,slope,ka)=>{
+    if(Math.abs(x)>ARENA*0.99||Math.abs(z)>ARENA*0.99) return;
+    const h=Math.min(240, r*slope);
+    terrainBumps.push({x, z, r, h, k:2+((Math.random()*4)|0), phase:Math.random()*Math.PI*2, amp:(ka||0.10)+Math.random()*0.10});
+    mountains.push({x, z, r:r*0.5, h});
+  };
+  // 3–4 mountain ranges hugging the periphery
+  const ranges=3+((Math.random()*2)|0);
+  for(let rg=0; rg<ranges; rg++){
+    let sx,sz,tries=0;
+    do{ const a=Math.random()*Math.PI*2, rad=ARENA*(0.60+Math.random()*0.34);
+        sx=Math.cos(a)*rad; sz=Math.sin(a)*rad; tries++; }
+    while(blocked(sx,sz,300) && tries<30);
+    if(tries>=30) continue;
+    const dir=Math.random()*Math.PI*2, segs=3+((Math.random()*3)|0), step=170+Math.random()*120;
+    for(let s=0;s<segs;s++){
+      const px=sx+Math.cos(dir)*step*s + (Math.random()-0.5)*130;
+      const pz=sz+Math.sin(dir)*step*s + (Math.random()-0.5)*130;
+      if(blocked(px,pz,150)) continue;
+      addHill(px, pz, 470+Math.random()*330, 0.16+Math.random()*0.09);   // shallow grade
+    }
+  }
+  // a few isolated low rises / dunes for variety (very gentle)
+  for(let i=0;i<5;i++){
+    let x,z,t=0;
+    do{ x=(Math.random()*2-1)*ARENA*0.9; z=(Math.random()*2-1)*ARENA*0.9; t++; }
+    while((blocked(x,z,220) || Math.hypot(x,z)<ARENA*0.16) && t<24);
+    if(t>=24) continue;
+    addHill(x, z, 380+Math.random()*220, 0.07+Math.random()*0.06, 0.08);
   }
   buildTerrainMesh();
-  // ---- buildings — textured facades (windows) + plain roof ----
-  const count = 26;
-  for(let i=0;i<count;i++){
-    const w = 34+Math.random()*70, d=34+Math.random()*70, h=34+Math.random()*150;
-    const facade = TEX.bld[i%TEX.bld.length].clone(); facade.needsUpdate=true;
-    facade.repeat.set(Math.max(1,Math.round(w/34)), Math.max(1,Math.round(h/26)));
-    const side = new THREE.MeshStandardMaterial({map:facade, color:0xb6c2b8, roughness:.85, metalness:.08,
-      emissive:0x9fffc0, emissiveMap:facade, emissiveIntensity:0.22});
-    side.color.offsetHSL(0,0,(Math.random()-0.5)*0.08);
-    const roof = new THREE.MeshStandardMaterial({map:TEX.roof, color:0x9aa39c, roughness:.92, metalness:.05});
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), [side,side,roof,roof,side,side]);
-    let x,z, tries=0;
-    do{ x=(Math.random()*2-1)*ARENA*0.88; z=(Math.random()*2-1)*ARENA*0.88; tries++; }
-    while((blocked(x,z,40) || Math.hypot(x,z)<120) && tries<24);
-    if(tries>=24) continue;
-    // buildings sit on the terrain; lift them so the base isn't buried in a slope
-    const gy=terrainHeightAt(x,z);
-    m.position.set(x, gy+h/2, z);
-    scene.add(m);
-    const box = new THREE.Box3().setFromObject(m);
-    // `top` = walkable roof height; `base` = where the solid wall starts
-    obstacles.push({mesh:m, box, hw:w/2+6, hd:d/2+6, x, z, h, base:gy, top:gy+h});
+  // ---- buildings — a Martian colony laid out in districts (grid blocks + streets) ----
+  // Lots sit on a rotated grid with street gaps; towers rise toward each district
+  // centre to give a believable skyline instead of random scatter.
+  const dep = opt.deploy || {x:(clear[0]?clear[0].x:0), z:(clear[0]?clear[0].z:0)};
+  const base = opt.base || null;
+  const district=(cx,cz,cols,rows,spacing,maxH)=>{
+    const baseAng=Math.random()*Math.PI, ca=Math.cos(baseAng), sa=Math.sin(baseAng);
+    const half=spacing*Math.max(cols,rows)/2;
+    for(let gx=0; gx<cols; gx++) for(let gz=0; gz<rows; gz++){
+      if(Math.random()<0.14) continue;                       // plazas / empty lots
+      const lx=(gx-(cols-1)/2)*spacing, lz=(gz-(rows-1)/2)*spacing;
+      const x=cx + lx*ca - lz*sa + (Math.random()-0.5)*10;
+      const z=cz + lx*sa + lz*ca + (Math.random()-0.5)*10;
+      if(blocked(x,z,28)) continue;
+      const distC=Math.min(1, Math.hypot(lx,lz)/half);        // 0 centre → 1 edge
+      const w=22+Math.random()*30, d=22+Math.random()*30;
+      const h=Math.max(24, maxH*(1-distC*0.62)*(0.5+Math.random()*0.6));
+      const facade = TEX.bld[(gx+gz)%TEX.bld.length].clone(); facade.needsUpdate=true;
+      facade.repeat.set(Math.max(1,Math.round(w/30)), Math.max(1,Math.round(h/26)));
+      const side = new THREE.MeshStandardMaterial({map:facade, color:0xb6a890, roughness:.9, metalness:.05,
+        emissive:0xffca92, emissiveMap:facade, emissiveIntensity:0.16});
+      side.color.offsetHSL((Math.random()-0.5)*0.03,0,(Math.random()-0.5)*0.1);
+      const roof = new THREE.MeshStandardMaterial({map:TEX.roof, color:0xa89a84, roughness:.95, metalness:.04});
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), [side,side,roof,roof,side,side]);
+      const gy=terrainHeightAt(x,z);
+      m.position.set(x, gy+h/2, z); scene.add(m);
+      const box=new THREE.Box3().setFromObject(m);
+      obstacles.push({mesh:m, box, hw:w/2+6, hd:d/2+6, x, z, h, base:gy, top:gy+h});
+    }
+  };
+  // district anchors: between deploy and base on assault maps, else around the map
+  let anchors;
+  if(base){
+    anchors=[ {x:(dep.x+base.x)/2, z:(dep.z+base.z)/2, cols:5, rows:5, sp:62, maxH:185},
+              {x:dep.x+(base.x-dep.x)*0.74, z:dep.z+(base.z-dep.z)*0.74, cols:4, rows:4, sp:58, maxH:120} ];
+  } else {
+    anchors=[ {x:ARENA*0.30, z:-ARENA*0.12, cols:5, rows:5, sp:62, maxH:185},
+              {x:-ARENA*0.30, z:ARENA*0.24, cols:4, rows:4, sp:58, maxH:150},
+              {x:ARENA*0.04, z:ARENA*0.42, cols:4, rows:3, sp:56, maxH:120} ];
   }
+  anchors.forEach(a=>district(a.x, a.z, a.cols, a.rows, a.sp, a.maxH));
 }
 
 /* ---------- mech model builder ----------
@@ -1291,7 +1331,7 @@ function startMission(mi){
     clear.push({x:base.x,z:base.z,r:280});
     for(let t=0.3;t<1;t+=0.22) clear.push({x:dep.x+(base.x-dep.x)*t, z:dep.z+(base.z-dep.z)*t, r:170});
   } else clear.push({x:0,z:0,r:160});
-  buildArena(clear);
+  buildArena(clear, {deploy:dep, base});
   // place the player on the (now-generated) terrain at the deploy point
   player.pos.set(dep.x, terrainHeightAt(dep.x, dep.z), dep.z);
   clearActors();
@@ -2243,7 +2283,7 @@ function drawRadar(){
   const scaleR = R/ (ARENA*0.9);
   // terrain: faint mountain footprints for navigation
   const cyr=Math.cos(player.yaw), syr=Math.sin(player.yaw);
-  ctx.fillStyle='rgba(120,150,120,.22)';
+  ctx.fillStyle='rgba(170,110,70,.26)';
   for(const mt of mountains){
     const dx=mt.x-player.pos.x, dz=mt.z-player.pos.z;
     const rx=dx*cyr-dz*syr, rz=dx*syr+dz*cyr;
@@ -2542,8 +2582,9 @@ let pointerLocked=false;
 let gpConnected=false;          // a gamepad (Switch Pro等) is present
 let gpLastSeen=0;               // performance.now() of last readable frame
 let gpStamp=-1;                 // last gamepad.timestamp seen (to detect stalls)
-let gpFreshAt=0;               // performance.now() when ts last advanced
-let gpFrozen=false;            // pad state stuck (iOS Bluetooth throttle)
+let gpSig=0;                    // signature of axes+buttons (detect real input changes)
+let gpFreshAt=0;               // performance.now() when input last advanced
+let gpFrozen=false;            // pad genuinely stalled (diagnostic only — never zeroes input)
 let frameCount=0;               // rAF heartbeat — proves the loop is alive
 const fireHeld={1:false,2:false};   // hold-to-fire for both touch and mouse
 
@@ -2667,16 +2708,18 @@ function pollGamepad(dt){
   }
   gpLastSeen=now;
   if(!gpConnected){ gpConnected=true; refreshTouchUI(); Audio.resume(); }
-  // --- frozen-pad detection: rAF keeps running but gamepad.timestamp stops advancing ---
-  if(gp.timestamp!==gpStamp){ gpStamp=gp.timestamp; gpFreshAt=now; if(gpFrozen){ gpFrozen=false; ticker('コントローラー復帰'); } }
-  if(STATE.mode==='playing' && now-gpFreshAt>800){
-    if(!gpFrozen){ gpFrozen=true; bigMsg('入力停止 — 自動復帰中'); ticker('直らない時は別タブへ一瞬切替で復帰します'); }
-    gpKick();                                   // try to wake the HID/audio pipeline
-    moveVec.x=0; moveVec.y=0;                    // neutralize stuck inputs so the mech doesn't run away
-    fireHeld[1]=fireHeld[2]=false; keys['jet']=false;
-    return;                                      // ignore stale axis/button snapshot this frame
-  }
   const ax=gp.axes, btn=gp.buttons||[];
+  // --- liveness: the pad is "fresh" when its timestamp advances OR its inputs change.
+  // iPadOS only bumps gamepad.timestamp on a *state change*, so a steady-held stick
+  // (climbing a slope, holding a turn) must NOT be mistaken for a frozen pad. We key
+  // freshness off an input signature too, and we always apply the live snapshot below
+  // — never zeroing it on a stall — so held inputs keep working without false alarms.
+  let sig=0|0;
+  for(let i=0;i<ax.length;i++) sig=(Math.imul(sig,131) + ((ax[i]*128)|0))|0;
+  for(let i=0;i<btn.length;i++) sig=(Math.imul(sig,131) + (btn[i]&&btn[i].pressed?1:0))|0;
+  if(gp.timestamp!==gpStamp || sig!==gpSig){ gpStamp=gp.timestamp; gpSig=sig; gpFreshAt=now; if(gpFrozen){ gpFrozen=false; ticker('コントローラー復帰'); } }
+  // Only after a long, genuine stall do we *silently* nudge the HID pipeline awake.
+  if(STATE.mode==='playing' && now-gpFreshAt>1600){ gpFrozen=true; gpKick(); }
   const dz=v=>Math.abs(v)<0.18?0:v;
   let mx=dz(ax[0]||0), my=dz(ax[1]||0);
   const rx=dz(ax[2]||0), ry=dz(ax[3]||0);
