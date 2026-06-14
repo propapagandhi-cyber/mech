@@ -835,6 +835,71 @@ const MISSIONS = [
      {msg:'防衛線を制圧 — 砲撃機に警戒',     at:'base', structures:['turret','radar','antenna'], foes:['ranger','missl'], reinforce:['ranger','hover']},
      {msg:'拠点中枢を破壊 — カタパルト斉射に警戒', at:'base', structures:['fuel','hq'], foes:['missl','ranger','heavy'], reinforce:['missl','ranger']},
    ]},
+  // ============================================================
+  //  新規7任務: 僚機ランスを率いた連携戦（戦術コマンド・部品サルベージ・新戦域）
+  //  ※ 僚機ベイで雇用・編成し、戦闘中は C / X / 「指示」で 各個撃破・集中攻撃・護衛・退避 を使い分ける
+  // ============================================================
+  {id:13, name:'共同戦線 — 紅砂の機甲戦', diff:'★★★★', reward:820000, planet:'mars',
+   briefing:'傭兵団に味方ランスが配属された。火星の機甲師団と正面からぶつかる演習を兼ねた実戦だ。【連携の要点】①出撃前に「僚機ベイ」で僚機を雇用・編成せよ（最大2機）。②戦闘中は C キー（パッド X／タッチ「指示」）で僚機の行動を切り替えられる——各個撃破で散開、集中攻撃でロック目標へ火力集中、護衛で随伴、退避で後退。③味方は被弾で大破する。重装甲の敵には集中攻撃で速やかに仕留めろ。④撃破した敵からは兵装(部品)を確率で回収できる——強力な機甲部隊は良い獲物だ。',
+   deploy:{x:-760,z:780}, base:{x:720,z:-700},
+   stages:[
+     {msg:'進攻路の哨戒を排除',            at:'route', foes:['med','tank','scout']},
+     {msg:'前線拠点を制圧 — 集中攻撃が有効', at:'base', structures:['turret','radar','antenna'], foes:['heavy','med'], reinforce:['tank','med']},
+     {msg:'機甲主力を撃破',                at:'base', structures:['fuel','hq'], foes:['heavy','heavy','med'], reinforce:['heavy','tank']},
+   ]},
+  {id:14, name:'月面都市強襲 — 夜戦', diff:'★★★★★', reward:980000, planet:'luna',
+   briefing:'新戦域——月（ルナ）。漆黒の空の下、青く灯る月面都市の防衛網を夜襲する。無大気・低重力の戦場だ。市街は入り組み、SAMとタレットが幾重にも交差射撃を敷く。【作戦の要点】①狭い市街では僚機が分断され各個撃破されやすい——護衛指示で随伴させ、要所では集中攻撃で防衛網を素早く崩せ。②レーダーを先に潰せば防空照準が乱れる。③撃破した防衛部隊から兵装を回収し、最深部の司令部突入に備えよ。',
+   deploy:{x:0,z:840}, base:{x:0,z:-740},
+   stages:[
+     {msg:'市街外縁を突破 — 伏兵', at:'route', ambush:true, foes:['tank','hover','med','scout']},
+     {msg:'防空網を無力化（レーダー優先）', at:'base', structures:['radar','sam','turret','turret'], foes:['heavy','med','tank']},
+     {msg:'司令部を破壊せよ', at:'base', structures:['fuel','hq'], foes:['heavy','heavy','med'], reinforce:['med','tank','hover']},
+   ]},
+  {id:15, name:'氷海プラットフォーム制圧', diff:'★★★★★', reward:1050000, planet:'ice',
+   briefing:'氷衛星エウロパの氷海に浮かぶ敵の砲撃プラットフォームを制圧する。守りの主力はカタパルト砲撃機の集中配備だ。【作戦の要点】①カタパルトは斉射が厄介だが装甲は薄い——「集中攻撃」で僚機の火力を一機ずつ束ねて速攻せよ。②斉射は緩く追尾する。氷丘や建物を遮蔽に使い横移動でかわせ。③長距離の砲撃陣を崩したら、退避で僚機を温存しつつ立て直すのも有効だ。',
+   deploy:{x:-820,z:800}, base:{x:760,z:-720},
+   stages:[
+     {msg:'氷原を進攻 — 高機動偵察', at:'route', foes:['ranger','ranger','scout']},
+     {msg:'砲撃陣を制圧 — カタパルトに集中攻撃', at:'base', structures:['sam','radar','turret'], foes:['missl','missl','ranger'], reinforce:['missl','ranger']},
+     {msg:'中枢を破壊 — 砲撃斉射に警戒', at:'base', structures:['fuel','fuel','hq'], foes:['missl','heavy','ranger'], reinforce:['missl','missl']},
+   ]},
+  {id:16, name:'紅砂の機甲決戦 — 鉄量の暴力', diff:'★★★★★★', reward:1240000, planet:'mars',
+   briefing:'火星最大の機甲集結地への強襲。重機甲と戦車の鉄量がこちらを圧殺しにかかる。【作戦の要点】①数で押される——僚機は重装甲機を最優先で雇用・編成せよ。②正面の撃ち合いでは集中攻撃で一機ずつ確実に減らし、被弾がかさむ僚機は退避で離脱させて立て直す。③燃料デポの大爆発を機甲密集に誘爆させれば一掃できる。④回収できる兵装も大型だ——AC/20やPPC級の部品が狙える。',
+   deploy:{x:0,z:900}, base:{x:0,z:-820},
+   stages:[
+     {msg:'外縁警戒線を突破 — 伏兵', at:'route', ambush:true, foes:['tank','tank','heavy','hover']},
+     {msg:'第一機甲列を撃破', at:'route', structures:['turret','sam','radar'], foes:['heavy','heavy','med','tank']},
+     {msg:'機甲集結地を制圧', at:'base', structures:['fuel','fuel','turret'], foes:['heavy','heavy','tank','med'], reinforce:['heavy','tank']},
+     {msg:'司令部を粉砕せよ', at:'base', structures:['hq'], foes:['heavy','heavy','heavy'], reinforce:['heavy','heavy','med']},
+   ]},
+  {id:17, name:'月の暗礁 — 司令網切断', diff:'★★★★★★', reward:1380000, planet:'luna',
+   briefing:'月の裏側、暗礁地帯に隠された敵の統合司令網を切断する。多重の防空網と濃密な増援が待つ最深部攻略戦だ。【作戦の要点】①広大な夜間戦域——コンパスと画面端の脅威矢印で死角の敵を把握せよ。②SAM・レーダーを優先破壊して防空を崩し、僚機を護衛で温存しながら段階的に前進。③最深部では二波の親衛隊が出る。集中攻撃で各個撃破し、被ダメージは部位を散らして耐えろ。',
+   deploy:{x:-860,z:860}, base:{x:780,z:-760},
+   stages:[
+     {msg:'暗礁地帯を進攻 — 伏兵', at:'route', ambush:true, foes:['hover','hover','tank','scout','med']},
+     {msg:'前進防空を制圧', at:'route', structures:['sam','turret','turret','radar'], foes:['heavy','med','tank']},
+     {msg:'内郭の防空を無力化', at:'base', structures:['sam','sam','radar','antenna'], foes:['heavy','heavy','med'], reinforce:['med','tank','hover']},
+     {msg:'統合司令部を切断せよ', at:'base', structures:['fuel','fuel','hq'], foes:['heavy','heavy','med'], reinforce:['heavy','heavy','tank']},
+   ]},
+  {id:18, name:'氷衛星の最終防衛線', diff:'★★★★★★', reward:1520000, planet:'ice',
+   briefing:'氷衛星エウロパに残る敵最後の要塞。精鋭のカタパルト砲撃隊とシャドウキャット遊撃隊が二重の防衛線を固める。【作戦の要点】①遊撃のシャドウキャットが僚機を翻弄する——護衛で守りを固めつつ、砲撃機には集中攻撃で速攻。②長距離砲撃の只中では退避でいったん下げ、遮蔽から再突入する判断が生死を分ける。③回収兵装はLRM系の長射程が狙える。次戦に備えて部品を集めろ。',
+   deploy:{x:0,z:880}, base:{x:0,z:-780},
+   stages:[
+     {msg:'氷原突破 — 遊撃隊の襲撃', at:'route', ambush:true, foes:['ranger','ranger','missl','scout']},
+     {msg:'第一防衛線を制圧', at:'base', structures:['sam','radar','turret','turret'], foes:['missl','missl','ranger','heavy']},
+     {msg:'第二防衛線を突破', at:'base', structures:['sam','sam','antenna'], foes:['missl','ranger','heavy'], reinforce:['missl','ranger']},
+     {msg:'要塞中枢を殲滅せよ', at:'base', structures:['fuel','fuel','hq'], foes:['heavy','missl','ranger'], reinforce:['missl','missl','ranger']},
+   ]},
+  {id:19, name:'総力戦 — 鋼鉄の黎明', diff:'★★★★★★★', reward:2100000, planet:'mars',
+   briefing:'これが最終契約だ。敵の全戦力が結集する総司令部へ、ランスを率いて総攻撃をかける。あらゆる機種・車両・新型機が波状に押し寄せる総力戦——これまで磨いた連携の全てを賭けろ。【作戦の要点】①重装甲僚機をフル編成し、装甲・冷却・兵装を万全に整えて臨め。②段階ごとに指示を切り替える——前進は各個撃破、防空崩しは集中攻撃、被害が出たら護衛/退避で立て直す。③最深部の総司令部では精鋭親衛隊が三波にわたり出撃する。鋼鉄の黎明を掴め。',
+   deploy:{x:0,z:980}, base:{x:0,z:-880},
+   stages:[
+     {msg:'外縁を突破 — 大規模伏兵', at:'route', ambush:true, foes:['tank','tank','hover','heavy','med','scout']},
+     {msg:'第一防衛網を制圧', at:'route', structures:['sam','turret','turret','radar'], foes:['heavy','heavy','med','tank']},
+     {msg:'内郭の防空を無力化', at:'base', structures:['sam','sam','radar','antenna','turret'], foes:['heavy','heavy','missl','wasp'], reinforce:['med','tank','ranger']},
+     {msg:'補給中枢を爆破', at:'base', structures:['fuel','fuel','fuel'], foes:['heavy','heavy','med','missl'], reinforce:['heavy','wasp','tank']},
+     {msg:'総司令部を殲滅せよ', at:'base', structures:['hq'], foes:['heavy','heavy','heavy','wasp','missl'], reinforce:['heavy','heavy','med','ranger']},
+   ]},
 ];
 
 /* ---------- SAVE ---------- */
@@ -1126,6 +1191,13 @@ const PLANETS = {
     sunColor:0xd2ecff, sunInt:0.82,
     terr:{sand:0x6f88a0, ochre:0x90a9c2, rock:0x3a4e60, pale:0xe8f3fb},
     ground:0x5a7388, bld:0x93a8ba, bldEmissive:0x8fd6ff, bldEmInt:0.22 },
+  // 月（ルナ）: 漆黒の空に冴える夜戦。灰色のレゴリスと、青く灯る月面都市の照明が際立つ無大気の戦域。
+  luna: { name:'月（ルナ）夜戦',
+    sky:0x05060a, fog:0x0b0e16, fogNear:560, fogFar:2600,
+    hemiSky:0x7e8aa0, hemiGround:0x14161c, hemiInt:0.70,
+    sunColor:0xeef2ff, sunInt:1.05,
+    terr:{sand:0x6a6e76, ochre:0x7c808a, rock:0x3a3d44, pale:0xb9c0cc},
+    ground:0x5e636b, bld:0x8a93a2, bldEmissive:0x37d6ff, bldEmInt:0.55 },
 };
 let currentPlanet = PLANETS.mars;
 let hemiLight=null, sunLight=null, groundMesh=null;
