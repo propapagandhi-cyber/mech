@@ -562,9 +562,9 @@ const FOES = {
           shape:'tank',      move:'bruiser',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5],   kind:'vehicle'},
   hover: {name:'ホバータンク',  structure:90,  speed:48, dmg:9,  fireCd:0.85,range:300, color:0x4ab0c8, scale:0.95, reward:11000,
           shape:'hover',     move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[1.0,2.0],kind:'vehicle'},
-  // ---- 階段状装甲の重装ミサイル機（LEGO由来）: 肩に2基のミサイルポッド ----
-  fort:  {name:'ジッグラト',  structure:310, speed:14, dmg:27, fireCd:1.9, range:470, color:0xd8c49a, scale:1.2, reward:42000,
-          shape:'ziggurat', move:'bruiser',  jump:0,   jumpCd:[99,99],  strafeCd:[3.5,5.5]},
+  // ---- 長距離火力支援機（LEGO由来）: 長い両腕の砲＋背面の高い格子マスト ----
+  spot:  {name:'スケアクロウ', structure:205, speed:18, dmg:16, fireCd:1.5, range:540, color:0x8a93a0, scale:1.05, reward:24000,
+          shape:'scarecrow', move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[2.2,3.6]},
 };
 
 /* ---------- DATA: destructible facilities (施設) ----------
@@ -585,7 +585,7 @@ const MISSIONS = [
   {id:1, name:'国境襲撃',      diff:'★★☆☆', reward:90000,  waves:[['grunt','scout'],['scout','med'],['med','grunt','scout']]},
   {id:2, name:'補給線遮断',    diff:'★★★☆', reward:150000, waves:[['med','scout'],['heavy','grunt'],['med','med','scout']]},
   {id:3, name:'威力偵察',   diff:'★★★☆', reward:210000, waves:[['med','scout','wasp'],['heavy','med'],['heavy','wasp']]},
-  {id:4, name:'指揮系統破壊',     diff:'★★★★', reward:340000, waves:[['heavy','med','med'],['heavy','wasp','wasp'],['fort','heavy','med','wasp']]},
+  {id:4, name:'指揮系統破壊',     diff:'★★★★', reward:340000, waves:[['heavy','med','med'],['spot','heavy','wasp'],['heavy','heavy','med','wasp']]},
   // ---- 目標達成型ミッション（施設破壊・待ち伏せ・車両） ----
   {id:5, name:'通信封鎖作戦', diff:'★★★★', reward:430000,
    briefing:'敵の通信網がこの戦区の防空を支えている。前線哨戒を抜き、通信アンテナとレーダー基地を破壊して敵の目を潰せ。設備を破壊すれば守備隊が反撃に出るだろう。撤退路では待ち伏せが予想される。',
@@ -606,7 +606,7 @@ const MISSIONS = [
    stages:[
      {msg:'降着地点で交戦 — 待ち伏せ！', ambush:true, foes:['med','hover','hover']},
      {msg:'防衛網を突破',           structures:['radar','turret','turret','antenna'], foes:['heavy','med']},
-     {msg:'司令部を破壊せよ',       structures:['hq'], foes:['fort','heavy','wasp'], reinforce:['med','tank']},
+     {msg:'司令部を破壊せよ',       structures:['hq'], foes:['heavy','heavy','wasp'], reinforce:['spot','med']},
    ]},
   // ---- 基地強襲（広域マップ・外縁から侵攻して敵基地を制圧） ----
   {id:8, name:'前線基地強襲', diff:'★★★★☆', reward:620000,
@@ -1177,32 +1177,37 @@ function buildMech(def){
     B(11,5,11,mat,0,14,0);                                    // turret
     for(const s of [-1,1]) C(1.3,1.3,13,dark,s*3.5,14,10,torsoG,Math.PI/2); // twin barrels
     B(5,3,4,dark,0,17,-3); EYE(17.4,2.4,3.5);
-  } else if(shape==='ziggurat'){
-    // 階段状(ジッグラト)の重装甲ブロック機 — LEGO由来。
-    // 砂色の積層装甲＋ライラック紫の帯＋グレーの傾斜コックピット、肩に2基のミサイルポッド。
-    const tan   = mat;  // def.color = 砂色(タン)
-    const lilac = new THREE.MeshStandardMaterial({color:0xb89cc8, roughness:.55, metalness:.4, map:TEX.hull||null});
-    const steel = new THREE.MeshStandardMaterial({color:0x9aa1a8, roughness:.5,  metalness:.55,map:TEX.hull||null});
-    const tube  = new THREE.MeshStandardMaterial({color:0x3a4450, roughness:.6,  metalness:.55});
+  } else if(shape==='scarecrow'){
+    // LEGO由来の長距離火力支援機。箱型胴体＋胸部ビューポート、左右に長く張り出した
+    // 細腕（先端に砲）、上部前方の太い砲、背面の高い格子マスト、柱状の脚。
+    const steel = new THREE.MeshStandardMaterial({color:0x9aa1a8, roughness:.5, metalness:.55, map:TEX.hull||null});
     const warn  = new THREE.MeshStandardMaterial({color:0xff5a3a, emissive:0xff3a1f, emissiveIntensity:1.1});
-    // 階段状に積み上がる砂色の胴体（下ほど広い）
-    B(34,4,22,lilac,0,7,0);          // 紫の基部帯
-    B(30,6,20,tan,  0,11,0);         // 第1段（最も広い）
-    B(24,6,17,tan,  0,16.5,1);       // 第2段
-    B(18,5,13,tan,  0,21.5,2);       // 第3段（最上段）
-    B(28,2,18,lilac,0,14,0.2);       // 中段の紫アクセント帯
-    // グレーの傾斜コックピット（LEGOのダークグレー6x6プレート相当）
-    const canopy=B(15,9,3,steel,0,18,9.5); canopy.rotation.x=-0.5;
-    EYE(19.6,11.2,8);                // 発光バイザー
-    // 肩のミサイルポッド ×2（前向きの2×2発射筒）
+    const beac  = new THREE.MeshStandardMaterial({color:0xff3a2f, emissive:0xff2a1f, emissiveIntensity:1.2});
+    // 箱型の胴体＋胸部の凹んだビューポート
+    B(20,18,12,mat,0,20,0);
+    B(11,8,1.2,dark,0,20,6.2);                       // ビューポート枠
+    EYE(20,6.9,9);                                   // 胸部の発光バイザー
+    // 上部前方の太い砲（グレーの円筒）
+    C(4.2,4.2,17,steel,0,31,3,torsoG,Math.PI/2);
+    C(1.6,1.6,4,dark,0,31,12,torsoG,Math.PI/2);      // 砲口
+    const sns=B(3,3,6,dark,-6,31.5,2); sns.rotation.x=0.5; // 上面の小型アングルセンサー
+    // 左右に長く張り出した細腕 ×2（先端に小火器）
     for(const s of [-1,1]){
-      B(9,9,11,steel,s*18,20,1);                              // ポッド筐体
-      for(const dx of [-2.4,2.4]) for(const dy of [-2.2,2.4]) // 4連ミサイル筒
-        C(1.5,1.5,12,tube,s*18+dx,20+dy,6,torsoG,Math.PI/2);
-      B(3,3,3,warn,s*18,25.5,2);                              // ロックオン警告灯
+      B(5,5,5,dark,s*9,26,0);                         // 肩関節
+      B(28,2.4,3,steel,s*23,26,0);                    // 横に伸びる細腕ビーム
+      C(1.3,1.3,9,dark,s*36,26,3,torsoG,Math.PI/2);   // 先端の砲身
+      B(2.4,2.4,2.4,warn,s*36,26,8);                  // 銃口/標識
     }
-    // ずんぐりした短い脚＋幅広の足
-    for(const s of [-1,1]){ B(9,9,9,tan,s*8,8,0,legsG); B(8,5,8,steel,s*8,4,0,legsG); B(12,3,15,dark,s*8,1.2,1,legsG); }
+    // 背面の高い格子マスト（クレーン状トラス）
+    C(1.4,2,30,steel,0,45,-5);                        // 支柱
+    for(let k=32;k<58;k+=6){
+      B(6,0.7,0.7,dark,0,k,-5); B(0.7,0.7,6,dark,0,k,-5);          // 横材
+      B(0.8,6,0.8,steel,3,k+3,-5); B(0.8,6,0.8,steel,-3,k+3,-5);   // 縦材
+    }
+    B(4,2,4,steel,0,59,-5);                           // マスト頂部
+    B(1.8,1.8,1.8,beac,0,61,-5);                      // 頂部標識灯
+    // 真っ直ぐな柱状の脚
+    for(const s of [-1,1]){ B(5,18,5,mat,s*6,9,0,legsG); B(5.5,4,5.5,steel,s*6,2,0,legsG); B(8,3,10,dark,s*6,0.8,1,legsG); }
   } else {
     // grunt — stocky generic humanoid
     B(17,15,12,mat,0,20,0);
