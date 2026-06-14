@@ -76,6 +76,16 @@
   #statusBox{left:2%; top:3%; width:200px;}
   #throttleRow{display:flex; justify-content:space-between; align-items:baseline; margin-top:8px;}
 
+  /* AI 僚機ランス (top-left, under status) */
+  #lanceBox{left:2%; top:25%; width:190px;}
+  .hud.touchui #lanceBox{top:auto; bottom:34%;}
+  .lance{display:flex; align-items:center; gap:6px; font-size:11px; padding:2px 0;}
+  .lance .nm{flex:1; color:#bfeccb; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .lance .lbar{width:46px; height:6px; background:#0a0f0a; border:1px solid #1c2a1c; border-radius:2px; overflow:hidden; flex:0 0 auto;}
+  .lance .lbar > i{display:block; height:100%;}
+  .lance.down{opacity:.5;}
+  .lance.down .nm{text-decoration:line-through;}
+
   /* weapons (bottom-right) */
   #weaponBox{right:2%; bottom:13%; width:230px;}
   /* touch mode: fire/jet buttons live bottom-right, so park the weapon list top-right under the target panel */
@@ -204,6 +214,7 @@
   #fire2{right:150px; bottom:60px; width:78px; height:78px; font-size:12px;}
   #jet{right:64px; bottom:168px; width:72px; height:72px; font-size:12px; color:var(--cyan); border-color:#1e4458;}
   #cycle{right:176px; bottom:158px; width:64px; height:64px; font-size:11px; color:var(--cyan); border-color:#1e4458;}
+  #cmd{right:176px; bottom:230px; width:64px; height:64px; font-size:11px; color:var(--amber); border-color:#5a4410;}
   #lockBtn{right:176px; bottom:64px; width:64px; height:64px; font-size:11px; color:var(--cyan); border-color:#1e4458;}
   #pauseBtn{left:50%; transform:translateX(-50%); top:14px; width:56px; height:42px; border-radius:8px; font-size:18px; letter-spacing:.1em;}
   #pauseBtn.press{transform:translateX(-50%) scale(.92);}
@@ -248,6 +259,7 @@
     #fire2{width:60px; height:60px; right:106px; bottom:34px; font-size:11px;}
     #jet{width:56px; height:56px; right:40px; bottom:116px;}
     #cycle{width:52px; height:52px; right:118px; bottom:110px; font-size:10px;}
+    #cmd{width:52px; height:52px; right:118px; bottom:170px; font-size:10px;}
     #lockBtn{width:52px; height:52px; right:118px; bottom:34px; font-size:10px;}
     #lookzone{top:52px; bottom:160px;}
     .wrap{padding:28px 16px 60px;}
@@ -287,6 +299,11 @@
         <canvas id="doll" width="58" height="74" style="flex:0 0 auto;"></canvas>
         <div class="label" style="font-size:9px;line-height:1.4;opacity:.75;">部位装甲<br>頭/胴/腕/脚</div>
       </div>
+    </div>
+
+    <div class="panel" id="lanceBox" style="display:none;">
+      <div class="label" id="lanceHdr" style="margin-bottom:4px;">僚機ランス</div>
+      <div id="lanceList"></div>
     </div>
 
     <div class="panel" id="heatBox">
@@ -333,6 +350,7 @@
     <div class="tbtn" id="fire2">射撃&nbsp;2</div>
     <div class="tbtn" id="jet">JET</div>
     <div class="tbtn" id="cycle">目標&nbsp;▸</div>
+    <div class="tbtn" id="cmd">指示&nbsp;▸</div>
     <div class="tbtn" id="lockBtn">ロック</div>
     <div class="tbtn" id="pauseBtn">❚❚</div>
   </div>
@@ -411,6 +429,7 @@
         <div class="tab on" data-tab="loadout">装備</div>
         <div class="tab" data-tab="arsenal">武器市場</div>
         <div class="tab" data-tab="bay">整備ベイ</div>
+        <div class="tab" data-tab="lance">僚機</div>
       </div>
 
       <!-- LOADOUT -->
@@ -460,6 +479,15 @@
         </div>
       </div>
 
+      <!-- WINGMEN / LANCE -->
+      <div id="tabLance" style="display:none;">
+        <div class="card">
+          <h2 style="margin-top:0;">僚機ベイ — ランス編成（最大 <span id="lanceCap">2</span> 機）</h2>
+          <p class="note">雇用した僚機を「編成」すると、出撃時に味方AIメックとして随伴する。戦闘中は <b>C</b>（パッド: X / タッチ: 指示）で <b>各個撃破 / 集中攻撃 / 護衛 / 退避</b> を切り替えられる。</p>
+          <div id="wingList" class="mlist"></div>
+        </div>
+      </div>
+
       <div class="btnrow">
         <button class="btn" id="btnLabDeploy">契約へ</button>
         <button class="btn ghost" id="btnLabBack">タイトル</button>
@@ -476,6 +504,7 @@
       <div class="stat" id="brWaves"></div>
       <div class="stat" id="brReward" style="margin-top:6px;"></div>
       <div class="stat" id="brMech" style="margin-top:6px;"></div>
+      <div class="stat" id="brLance" style="margin-top:6px;"></div>
       <div class="btnrow">
         <button class="btn lg" id="btnLaunch">出撃 — 降下開始</button>
         <button class="btn ghost" id="btnBriefLab">先に再装備</button>
@@ -555,6 +584,32 @@ const CHASSIS = {
   atl: {id:'atl', name:'アトラス',    cls:'重量',  ton:60, slots:6, maxArmorBase:320, structure:160, speed:24, turn:1.05,baseCool:7,  cost:1250000, jet:0.55},
   dire:{id:'dire', name:'ダイアウルフ',cls:'強襲',  ton:88, slots:7, maxArmorBase:400, structure:240, speed:18, turn:0.8, baseCool:8,  cost:3400000, jet:0.35},
 };
+
+/* ---------- DATA: AI僚機（味方ランスメイト） ----------
+   雇用してランスに編成すると、出撃時に味方AIメックとして共闘する。
+   chassis=車体 / weps=搭載兵装（火力・射程の算出に使用） / move=機動AI個性。 */
+const WINGMEN = {
+  ace:  {id:'ace',  name:'“ケストレル”軽機',   chassis:'cmd', weps:['mdlas','mdlas','ac2'],  color:0x4ad6a0, move:'skirmish', cost:0,      free:true,
+         bio:'軽量級の偵察僚機。跳躍で間合いを詰め、レーザーで撹乱する。'},
+  iron: {id:'iron', name:'“アイアンサイド”中量機', chassis:'cnt', weps:['lglas','ac10','srm'],  color:0x46b0ff, move:'strafer',  cost:280000,
+         bio:'中量級の主力僚機。バランス型で前線を支える堅実な相棒。'},
+  titan:{id:'titan',name:'“タイタン”強襲機',   chassis:'atl', weps:['ppc','ac20','lrm15'],  color:0x9a8cff, move:'bruiser',   cost:760000,
+         bio:'重量級の火力僚機。鈍足だが圧倒的な装甲と火力で敵を粉砕する。'},
+};
+const WINGMAN_ORDER = ['ace','iron','titan'];
+// chassis → buildMech シルエット（味方は配色で識別する）
+function allyShape(chId){ return chId==='atl'||chId==='dire' ? 'warhammer' : chId==='cnt' ? 'hunchback' : 'locust'; }
+// 雇用機の車体＋兵装から、敵AI／描画パイプラインで使える foe 風 def を合成する
+function allyDef(wid){
+  const W=WINGMEN[wid], ch=CHASSIS[W.chassis];
+  const sum   = W.weps.reduce((s,id)=>s+(WEAPONS[id]?WEAPONS[id].dmg:0),0);
+  const range = W.weps.reduce((m,id)=>Math.max(m, WEAPONS[id]?WEAPONS[id].range:0), 220);
+  const scale = (W.chassis==='atl'||W.chassis==='dire')?1.2 : W.chassis==='cnt'?1.0 : 0.92;
+  return { name:W.name, color:W.color, scale, shape:allyShape(W.chassis), move:W.move,
+           structure: ch.maxArmorBase + ch.structure,           // 総耐久 = 装甲上限 + 内部構造
+           speed: ch.speed, dmg: Math.round(sum*0.7), range, fireCd:1.4,
+           jump: ch.jet>0.6?1.0:0, jumpCd:[4,8], strafeCd:[1.4,3] };
+}
 
 /* ---------- DATA: hit locations (本家メックウォーリア式の部位ダメージ) ----------
    頭部 / 胴中央 / 左右胴 / 左右腕 / 左右脚 に装甲と内部構造を分配する。
@@ -665,31 +720,32 @@ function damageLoc(unit, locId, rawDmg){
 //   bruiser  = slow heavy, grinds forward, no jets
 // shape: which silhouette buildMech() renders.  jump: jet thrust (0 = grounded).
 // jumpCd / strafeCd = [min,max] seconds between jumps / direction flips.
+// salvage = 撃破時に回収できる兵装の候補（部品サルベージ）。役割に合わせて設定。
 const FOES = {
   grunt: {name:'ジャベリン',  structure:90,  speed:20, dmg:9,  fireCd:1.2, range:300, color:0x8aa0b8, scale:0.95, reward:8000,
-          shape:'grunt',     move:'plodder',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5]},
+          shape:'grunt',     move:'plodder',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5],    salvage:['mdlas','srm']},
   scout: {name:'ローカスト',   structure:75,  speed:36, dmg:6,  fireCd:0.95,range:280, color:0x7fd0ff, scale:0.80, reward:10000,
-          shape:'locust',    move:'skirmish', jump:0.9, jumpCd:[4,7],    strafeCd:[1.2,2.4]},
+          shape:'locust',    move:'skirmish', jump:0.9, jumpCd:[4,7],    strafeCd:[1.2,2.4], salvage:['smlas','mg']},
   wasp:  {name:'ワスプ',      structure:100, speed:40, dmg:8,  fireCd:1.0, range:300, color:0x9affd0, scale:0.78, reward:14000,
-          shape:'wasp',      move:'jumpjet',  jump:1.6, jumpCd:[2.5,4.5],strafeCd:[0.9,1.6]},
+          shape:'wasp',      move:'jumpjet',  jump:1.6, jumpCd:[2.5,4.5],strafeCd:[0.9,1.6], salvage:['mdlas','srm']},
   med:   {name:'ハンチバック',structure:160, speed:24, dmg:14, fireCd:1.3, range:340, color:0xff8a4a, scale:1.0,  reward:18000,
-          shape:'hunchback', move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[1.8,3.2]},
+          shape:'hunchback', move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[1.8,3.2], salvage:['ac20','mplas']},
   heavy: {name:'ウォーハンマー',structure:270, speed:16, dmg:24, fireCd:1.7, range:430, color:0xff5a5a, scale:1.25, reward:34000,
-          shape:'warhammer', move:'bruiser',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5]},
+          shape:'warhammer', move:'bruiser',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5],    salvage:['ppc','lglas']},
   // ---- vehicles (敵車両) — low silhouette, no jump jets ----
   tank:  {name:'デモリッシャー戦車',structure:150, speed:22, dmg:20, fireCd:1.6, range:400, color:0x6b7a4a, scale:1.0, reward:13000,
-          shape:'tank',      move:'bruiser',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5],   kind:'vehicle'},
+          shape:'tank',      move:'bruiser',  jump:0,   jumpCd:[99,99],  strafeCd:[3,5],   kind:'vehicle', salvage:['ac10','hvy']},
   hover: {name:'ホバータンク',  structure:90,  speed:48, dmg:9,  fireCd:0.85,range:300, color:0x4ab0c8, scale:0.95, reward:11000,
-          shape:'hover',     move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[1.0,2.0],kind:'vehicle'},
+          shape:'hover',     move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[1.0,2.0],kind:'vehicle', salvage:['mg','mdlas']},
   // ---- 新型機（氷衛星エウロパ戦域で初確認） ----
   // カタパルト: 後背ポッドから誘導ロケットを斉射する砲撃機。射程は長いが装甲が薄く、
   //            遮蔽物で斉射をやり過ごして接近すれば仕留められる。＝バランス調整した「ミサイル攻撃」敵。
   missl: {name:'カタパルト',   structure:130, speed:20, dmg:6,  fireCd:1.4, range:470, color:0x9a7cff, scale:1.1,  reward:20000,
           shape:'catapult',  move:'strafer',  jump:0,   jumpCd:[99,99],  strafeCd:[2.2,3.8],
-          missile:true, salvo:4, mdmg:6, mcd:3.6},
+          missile:true, salvo:4, mdmg:6, mcd:3.6, salvage:['lrm','lrm15']},
   // シャドウキャット: 緑装甲の高機動偵察機。跳躍で間合いを詰めながら撹乱射撃を行う。
   ranger:{name:'シャドウキャット',structure:120, speed:38, dmg:11, fireCd:1.0, range:340, color:0x7a9a52, scale:0.95, reward:17000,
-          shape:'shadowcat', move:'skirmish', jump:1.1, jumpCd:[3,6],    strafeCd:[1.0,2.0]},
+          shape:'shadowcat', move:'skirmish', jump:1.1, jumpCd:[3,6],    strafeCd:[1.0,2.0], salvage:['mplas','mdlas']},
 };
 
 /* ---------- DATA: destructible facilities (施設) ----------
@@ -779,6 +835,71 @@ const MISSIONS = [
      {msg:'防衛線を制圧 — 砲撃機に警戒',     at:'base', structures:['turret','radar','antenna'], foes:['ranger','missl'], reinforce:['ranger','hover']},
      {msg:'拠点中枢を破壊 — カタパルト斉射に警戒', at:'base', structures:['fuel','hq'], foes:['missl','ranger','heavy'], reinforce:['missl','ranger']},
    ]},
+  // ============================================================
+  //  新規7任務: 僚機ランスを率いた連携戦（戦術コマンド・部品サルベージ・新戦域）
+  //  ※ 僚機ベイで雇用・編成し、戦闘中は C / X / 「指示」で 各個撃破・集中攻撃・護衛・退避 を使い分ける
+  // ============================================================
+  {id:13, name:'共同戦線 — 紅砂の機甲戦', diff:'★★★★', reward:820000, planet:'mars',
+   briefing:'傭兵団に味方ランスが配属された。火星の機甲師団と正面からぶつかる演習を兼ねた実戦だ。【連携の要点】①出撃前に「僚機ベイ」で僚機を雇用・編成せよ（最大2機）。②戦闘中は C キー（パッド X／タッチ「指示」）で僚機の行動を切り替えられる——各個撃破で散開、集中攻撃でロック目標へ火力集中、護衛で随伴、退避で後退。③味方は被弾で大破する。重装甲の敵には集中攻撃で速やかに仕留めろ。④撃破した敵からは兵装(部品)を確率で回収できる——強力な機甲部隊は良い獲物だ。',
+   deploy:{x:-760,z:780}, base:{x:720,z:-700},
+   stages:[
+     {msg:'進攻路の哨戒を排除',            at:'route', foes:['med','tank','scout']},
+     {msg:'前線拠点を制圧 — 集中攻撃が有効', at:'base', structures:['turret','radar','antenna'], foes:['heavy','med'], reinforce:['tank','med']},
+     {msg:'機甲主力を撃破',                at:'base', structures:['fuel','hq'], foes:['heavy','heavy','med'], reinforce:['heavy','tank']},
+   ]},
+  {id:14, name:'月面都市強襲 — 夜戦', diff:'★★★★★', reward:980000, planet:'luna',
+   briefing:'新戦域——月（ルナ）。漆黒の空の下、青く灯る月面都市の防衛網を夜襲する。無大気・低重力の戦場だ。市街は入り組み、SAMとタレットが幾重にも交差射撃を敷く。【作戦の要点】①狭い市街では僚機が分断され各個撃破されやすい——護衛指示で随伴させ、要所では集中攻撃で防衛網を素早く崩せ。②レーダーを先に潰せば防空照準が乱れる。③撃破した防衛部隊から兵装を回収し、最深部の司令部突入に備えよ。',
+   deploy:{x:0,z:840}, base:{x:0,z:-740},
+   stages:[
+     {msg:'市街外縁を突破 — 伏兵', at:'route', ambush:true, foes:['tank','hover','med','scout']},
+     {msg:'防空網を無力化（レーダー優先）', at:'base', structures:['radar','sam','turret','turret'], foes:['heavy','med','tank']},
+     {msg:'司令部を破壊せよ', at:'base', structures:['fuel','hq'], foes:['heavy','heavy','med'], reinforce:['med','tank','hover']},
+   ]},
+  {id:15, name:'氷海プラットフォーム制圧', diff:'★★★★★', reward:1050000, planet:'ice',
+   briefing:'氷衛星エウロパの氷海に浮かぶ敵の砲撃プラットフォームを制圧する。守りの主力はカタパルト砲撃機の集中配備だ。【作戦の要点】①カタパルトは斉射が厄介だが装甲は薄い——「集中攻撃」で僚機の火力を一機ずつ束ねて速攻せよ。②斉射は緩く追尾する。氷丘や建物を遮蔽に使い横移動でかわせ。③長距離の砲撃陣を崩したら、退避で僚機を温存しつつ立て直すのも有効だ。',
+   deploy:{x:-820,z:800}, base:{x:760,z:-720},
+   stages:[
+     {msg:'氷原を進攻 — 高機動偵察', at:'route', foes:['ranger','ranger','scout']},
+     {msg:'砲撃陣を制圧 — カタパルトに集中攻撃', at:'base', structures:['sam','radar','turret'], foes:['missl','missl','ranger'], reinforce:['missl','ranger']},
+     {msg:'中枢を破壊 — 砲撃斉射に警戒', at:'base', structures:['fuel','fuel','hq'], foes:['missl','heavy','ranger'], reinforce:['missl','missl']},
+   ]},
+  {id:16, name:'紅砂の機甲決戦 — 鉄量の暴力', diff:'★★★★★★', reward:1240000, planet:'mars',
+   briefing:'火星最大の機甲集結地への強襲。重機甲と戦車の鉄量がこちらを圧殺しにかかる。【作戦の要点】①数で押される——僚機は重装甲機を最優先で雇用・編成せよ。②正面の撃ち合いでは集中攻撃で一機ずつ確実に減らし、被弾がかさむ僚機は退避で離脱させて立て直す。③燃料デポの大爆発を機甲密集に誘爆させれば一掃できる。④回収できる兵装も大型だ——AC/20やPPC級の部品が狙える。',
+   deploy:{x:0,z:900}, base:{x:0,z:-820},
+   stages:[
+     {msg:'外縁警戒線を突破 — 伏兵', at:'route', ambush:true, foes:['tank','tank','heavy','hover']},
+     {msg:'第一機甲列を撃破', at:'route', structures:['turret','sam','radar'], foes:['heavy','heavy','med','tank']},
+     {msg:'機甲集結地を制圧', at:'base', structures:['fuel','fuel','turret'], foes:['heavy','heavy','tank','med'], reinforce:['heavy','tank']},
+     {msg:'司令部を粉砕せよ', at:'base', structures:['hq'], foes:['heavy','heavy','heavy'], reinforce:['heavy','heavy','med']},
+   ]},
+  {id:17, name:'月の暗礁 — 司令網切断', diff:'★★★★★★', reward:1380000, planet:'luna',
+   briefing:'月の裏側、暗礁地帯に隠された敵の統合司令網を切断する。多重の防空網と濃密な増援が待つ最深部攻略戦だ。【作戦の要点】①広大な夜間戦域——コンパスと画面端の脅威矢印で死角の敵を把握せよ。②SAM・レーダーを優先破壊して防空を崩し、僚機を護衛で温存しながら段階的に前進。③最深部では二波の親衛隊が出る。集中攻撃で各個撃破し、被ダメージは部位を散らして耐えろ。',
+   deploy:{x:-860,z:860}, base:{x:780,z:-760},
+   stages:[
+     {msg:'暗礁地帯を進攻 — 伏兵', at:'route', ambush:true, foes:['hover','hover','tank','scout','med']},
+     {msg:'前進防空を制圧', at:'route', structures:['sam','turret','turret','radar'], foes:['heavy','med','tank']},
+     {msg:'内郭の防空を無力化', at:'base', structures:['sam','sam','radar','antenna'], foes:['heavy','heavy','med'], reinforce:['med','tank','hover']},
+     {msg:'統合司令部を切断せよ', at:'base', structures:['fuel','fuel','hq'], foes:['heavy','heavy','med'], reinforce:['heavy','heavy','tank']},
+   ]},
+  {id:18, name:'氷衛星の最終防衛線', diff:'★★★★★★', reward:1520000, planet:'ice',
+   briefing:'氷衛星エウロパに残る敵最後の要塞。精鋭のカタパルト砲撃隊とシャドウキャット遊撃隊が二重の防衛線を固める。【作戦の要点】①遊撃のシャドウキャットが僚機を翻弄する——護衛で守りを固めつつ、砲撃機には集中攻撃で速攻。②長距離砲撃の只中では退避でいったん下げ、遮蔽から再突入する判断が生死を分ける。③回収兵装はLRM系の長射程が狙える。次戦に備えて部品を集めろ。',
+   deploy:{x:0,z:880}, base:{x:0,z:-780},
+   stages:[
+     {msg:'氷原突破 — 遊撃隊の襲撃', at:'route', ambush:true, foes:['ranger','ranger','missl','scout']},
+     {msg:'第一防衛線を制圧', at:'base', structures:['sam','radar','turret','turret'], foes:['missl','missl','ranger','heavy']},
+     {msg:'第二防衛線を突破', at:'base', structures:['sam','sam','antenna'], foes:['missl','ranger','heavy'], reinforce:['missl','ranger']},
+     {msg:'要塞中枢を殲滅せよ', at:'base', structures:['fuel','fuel','hq'], foes:['heavy','missl','ranger'], reinforce:['missl','missl','ranger']},
+   ]},
+  {id:19, name:'総力戦 — 鋼鉄の黎明', diff:'★★★★★★★', reward:2100000, planet:'mars',
+   briefing:'これが最終契約だ。敵の全戦力が結集する総司令部へ、ランスを率いて総攻撃をかける。あらゆる機種・車両・新型機が波状に押し寄せる総力戦——これまで磨いた連携の全てを賭けろ。【作戦の要点】①重装甲僚機をフル編成し、装甲・冷却・兵装を万全に整えて臨め。②段階ごとに指示を切り替える——前進は各個撃破、防空崩しは集中攻撃、被害が出たら護衛/退避で立て直す。③最深部の総司令部では精鋭親衛隊が三波にわたり出撃する。鋼鉄の黎明を掴め。',
+   deploy:{x:0,z:980}, base:{x:0,z:-880},
+   stages:[
+     {msg:'外縁を突破 — 大規模伏兵', at:'route', ambush:true, foes:['tank','tank','hover','heavy','med','scout']},
+     {msg:'第一防衛網を制圧', at:'route', structures:['sam','turret','turret','radar'], foes:['heavy','heavy','med','tank']},
+     {msg:'内郭の防空を無力化', at:'base', structures:['sam','sam','radar','antenna','turret'], foes:['heavy','heavy','missl','wasp'], reinforce:['med','tank','ranger']},
+     {msg:'補給中枢を爆破', at:'base', structures:['fuel','fuel','fuel'], foes:['heavy','heavy','med','missl'], reinforce:['heavy','wasp','tank']},
+     {msg:'総司令部を殲滅せよ', at:'base', structures:['hq'], foes:['heavy','heavy','heavy','wasp','missl'], reinforce:['heavy','heavy','med','ranger']},
+   ]},
 ];
 
 /* ---------- SAVE ---------- */
@@ -828,9 +949,12 @@ const DEFAULT_SAVE = () => ({
   },
   inventory:['smlas'],            // spare weapons not fitted
   unlockedMission:0,
+  hiredWingmen:['ace'],           // 雇用済みの僚機（無料の初期僚機を含む）
+  lance:['ace'],                  // 出撃に随伴する僚機（最大2機）
   stats:{kills:0, missions:0, deaths:0, damage:0},
   settings:{sens:110, sound:true},
 });
+const LANCE_MAX = 2;             // 同時出撃できる僚機の上限
 
 let SAVE = DEFAULT_SAVE();
 
@@ -879,6 +1003,12 @@ function sanitizeSave(s){
      && Object.values(out.chassisState).every(c=>c.loadout.length===0)){
     out.chassisState.cmd.loadout = [{id:'mdlas',grp:1,mount:'ra'},{id:'mdlas',grp:1,mount:'la'},{id:'ac2',grp:2,mount:'rt'}];
   }
+  // AI 僚機: 雇用済み（常に無料機を含む） + 出撃ランス（雇用済みのみ・上限あり）
+  out.hiredWingmen = Array.isArray(s.hiredWingmen) ? s.hiredWingmen.filter(id=>WINGMEN[id]) : [];
+  for(const id of WINGMAN_ORDER){ if(WINGMEN[id].free && !out.hiredWingmen.includes(id)) out.hiredWingmen.unshift(id); }
+  out.lance = (Array.isArray(s.lance) ? s.lance.filter(id=>WINGMEN[id] && out.hiredWingmen.includes(id)) : [])
+                .slice(0, LANCE_MAX);
+  if(!out.lance.length){ const free=WINGMAN_ORDER.find(id=>WINGMEN[id].free); if(free) out.lance=[free]; }
   // stats
   const st = (s.stats&&typeof s.stats==='object')?s.stats:{};
   out.stats = {kills:num(st.kills,0), missions:num(st.missions,0), deaths:num(st.deaths,0), damage:num(st.damage,0)};
@@ -1061,6 +1191,13 @@ const PLANETS = {
     sunColor:0xd2ecff, sunInt:0.82,
     terr:{sand:0x6f88a0, ochre:0x90a9c2, rock:0x3a4e60, pale:0xe8f3fb},
     ground:0x5a7388, bld:0x93a8ba, bldEmissive:0x8fd6ff, bldEmInt:0.22 },
+  // 月（ルナ）: 漆黒の空に冴える夜戦。灰色のレゴリスと、青く灯る月面都市の照明が際立つ無大気の戦域。
+  luna: { name:'月（ルナ）夜戦',
+    sky:0x05060a, fog:0x0b0e16, fogNear:560, fogFar:2600,
+    hemiSky:0x7e8aa0, hemiGround:0x14161c, hemiInt:0.70,
+    sunColor:0xeef2ff, sunInt:1.05,
+    terr:{sand:0x6a6e76, ochre:0x7c808a, rock:0x3a3d44, pale:0xb9c0cc},
+    ground:0x5e636b, bld:0x8a93a2, bldEmissive:0x37d6ff, bldEmInt:0.55 },
 };
 let currentPlanet = PLANETS.mars;
 let hemiLight=null, sunLight=null, groundMesh=null;
@@ -1467,17 +1604,33 @@ const player = {
   lastHit:null, lastHitT:0,
 };
 let enemies=[];        // {grp, def, pos, hp, maxhp, fireCd, vel, alive}
+let allies=[];         // AI僚機 {grp, def, wid, pos, hp, maxhp, loc, alive, eye, vy, fireCd, ...}
 let structures=[];     // {grp, def, type, pos, hp, maxhp, alive, isObjective, radius, aimY, height, fireCd}
 let projectiles=[];    // {mesh, vel, dmg, range, traveled, owner, splash, homing, target, color}
 let beams=[];          // transient hitscan beams {a,b,life,color}
 let laserSide=1;       // alternate left/right arm muzzle for beam visuals
 let mission=null, stageIdx=0, target=null, missionStartArmor=0, killsThisMission=0, dmgThisMission=0;
+let missionSalvage=[];   // 今回の作戦で回収した兵装(部品サルベージ) — 勝利時に兵装庫へ
+let salvageCredits=0;    // 撃破した敵から得たスクラップ収入（クレジット）
 // ---- lock-on (ロックオン) ----  state 0=なし 1=捕捉中 2=ロック確立
 let lockState=0, lockT=0, designated=null;
 const LOCK_TIME=0.45;
 let structKills=0, stageReinforced=false, stageEnding=false;
 const keys={};
 let invuln=0;
+let dmgDir=0, dmgDirT=0;          // 被弾方向インジケーター: 攻撃を受けた方位(world)と残存表示時間
+// ---- 僚機への戦術コマンド ----
+//   free=各個撃破（最寄り） / focus=集中攻撃（プレイヤーの目標） / guard=護衛（追従・近接のみ交戦） / fallback=退避（後退・射撃停止）
+const LANCE_ORDERS=['free','focus','guard','fallback'];
+const LANCE_ORDER_JP={free:'各個撃破', focus:'集中攻撃', guard:'護衛', fallback:'退避'};
+let lanceOrder='free';
+function cycleLanceOrder(){
+  if(!allies.some(a=>a.alive)){ toast('随伴中の僚機がいません', true); return; }
+  lanceOrder = LANCE_ORDERS[(LANCE_ORDERS.indexOf(lanceOrder)+1)%LANCE_ORDERS.length];
+  const jp=LANCE_ORDER_JP[lanceOrder];
+  bigMsg('僚機指示: '+jp); ticker('▶ 僚機指示: '+jp);
+  if(lanceOrder==='focus' && (!target || !target.alive)) ticker('▶ 僚機指示: 集中攻撃 — 目標を指定せよ');
+}
 
 /* ---------- chassis state helpers ---------- */
 function cstate(id){
@@ -1553,6 +1706,7 @@ function missionStages(m){
 function startMission(mi){
   mission=MISSIONS[mi]; mission._stages=missionStages(mission);
   stageIdx=0; killsThisMission=0; dmgThisMission=0; structKills=0; stageEnding=false;
+  missionSalvage=[]; salvageCredits=0;
   buildPlayerFromSave();
   missionStartArmor=player.armor;
   // deploy point + enemy base — for assault missions you start at the perimeter
@@ -1573,6 +1727,7 @@ function startMission(mi){
   // place the player on the (now-generated) terrain at the deploy point
   player.pos.set(dep.x, terrainHeightAt(dep.x, dep.z), dep.z);
   clearActors();
+  spawnAllies();
   setMode('playing');
   bigMsg('契約: '+mission.name);
   spawnStage();
@@ -1580,6 +1735,7 @@ function startMission(mi){
 }
 function clearActors(){
   enemies.forEach(e=>scene.remove(e.grp)); enemies=[];
+  allies.forEach(a=>scene.remove(a.grp)); allies=[];
   structures.forEach(s=>scene.remove(s.grp)); structures=[];
   projectiles.forEach(p=>scene.remove(p.mesh)); projectiles=[];
   beams=[]; target=null;
@@ -1624,6 +1780,131 @@ function spawnFoes(list, opt){
     spawnFoe(type, c.x, c.z, ang, dist);
   });
 }
+/* ---------- AI 僚機（味方ランス） ---------- */
+// deploy the player's lance beside/behind the drop point so they advance together
+function spawnAllies(){
+  allies.forEach(a=>scene.remove(a.grp)); allies=[];
+  lanceOrder='free';                                  // every contract starts on 各個撃破
+  const lance=(SAVE.lance||[]).filter(id=>WINGMEN[id]).slice(0, LANCE_MAX);
+  const sinY=Math.sin(player.yaw), cosY=Math.cos(player.yaw);
+  const fx=-sinY, fz=-cosY, rx=cosY, rz=-sinY;     // forward / right in XZ (yaw 0 => -Z)
+  lance.forEach((id,i)=>{
+    const def=allyDef(id);
+    const grp=buildMech(def);
+    const side=(i%2===0?1:-1)*(34+i*6), back=26+i*12;
+    const x=clamp(player.pos.x - fx*back + rx*side, -ARENA+40, ARENA-40);
+    const z=clamp(player.pos.z - fz*back + rz*side, -ARENA+40, ARENA-40);
+    const pos=new THREE.Vector3(x, terrainHeightAt(x,z), z);
+    grp.position.copy(pos); scene.add(grp);
+    const totArmor=Math.round(def.structure*0.55), totStruct=def.structure-totArmor;
+    allies.push({grp, def, wid:id, pos, hp:def.structure, maxhp:def.structure,
+      loc:makeLocations(totArmor, totStruct), alive:true, eye:9,
+      vy:0, jumping:false, jetT:0, fireCd:1+Math.random(),
+      strafeDir:(Math.random()<0.5?1:-1), strafeCd:1.5, modeCd:1});
+  });
+  if(lance.length) ticker('僚機 '+lance.length+'機 展開 — 共闘開始');
+}
+// nearest hostile (live foe first, else an objective facility) for a wingman to engage
+function allyAcquire(a){
+  let best=null, bd=1e9;
+  for(const e of enemies){ if(!e.alive) continue; const d=a.pos.distanceTo(e.pos); if(d<bd){ bd=d; best=e; } }
+  if(!best) for(const s of structures){ if(!s.alive || !s.isObjective) continue; const d=a.pos.distanceTo(s.pos); if(d<bd){ bd=d; best=s; } }
+  return best;
+}
+// a wingman fires a combined volley as a friendly hitscan (reuses the enemy/struct raycast)
+function allyFire(a, tgt){
+  const from=a.pos.clone(); from.y=(a.pos.y||0)+20*a.def.scale;
+  const tc=targetCenter(tgt);
+  const dir=tc.clone().sub(from).normalize();
+  const hit=raycastEnemies(from, dir, a.def.range+60, true);
+  if(!hit) return false;                              // no clear shot (cover / out of arc)
+  beams.push({a:from, b:hit.point.clone(), life:0.16, color:a.def.color, w:3});
+  fxFlash(from, a.def.color, 2.6); fxFlash(hit.point, a.def.color, 3.2); fxSpark(hit.point, a.def.color);
+  damageAny(hit, a.def.dmg);
+  Audio.laser();
+  return true;
+}
+// damage to a wingman: part-based like a foe, but no kill stats; death is a loss for the player
+function damageAlly(a, dmg){
+  if(!a.alive) return;
+  Audio.hit(); flashMesh(a.grp);
+  let killed=false;
+  if(a.loc){ const r=damageLoc(a, randLoc(a.loc), dmg); killed=r.killed; }
+  else { a.hp-=dmg; killed=a.hp<=0; }
+  if(killed || a.hp<=0){
+    a.alive=false; scene.remove(a.grp);
+    mechDeath(a);
+    ticker('⚠ 僚機『'+a.def.name+'』撃破'); bigMsg('僚機 撃破'); Audio.warn();
+  }
+}
+// drive every living wingman: engage the nearest hostile at weapon range, else regroup
+function updateAllies(dt){
+  const rndR=r=>r[0]+Math.random()*(r[1]-r[0]);
+  for(const a of allies){
+    if(!a.alive) continue;
+    const f=a.def;
+    // ---- target & engagement governed by the lance order ----
+    const order=lanceOrder;
+    const tgt=(order==='focus' && target && target.alive) ? target : allyAcquire(a);
+    a.combatTarget=tgt;
+    const distLeader=a.pos.distanceTo(player.pos);
+    const leash = order==='guard'?72 : order==='fallback'?52 : Infinity;   // how far we may stray from the leader
+    // engage when we have a target, aren't retreating, and are either unleashed or already in reach
+    let engage = !!tgt && order!=='fallback' && (distLeader<=leash || (tgt && a.pos.distanceTo(tgt.pos)<f.range));
+    // if we've drifted past the leash and can't shoot from here, regrouping on the leader wins
+    const regroup = distLeader>leash && !(engage && tgt && a.pos.distanceTo(tgt.pos)<f.range);
+    if(regroup) engage=false;
+    const dest = engage ? tgt.pos : player.pos;
+    const to=new THREE.Vector3(dest.x-a.pos.x, 0, dest.z-a.pos.z);
+    const dist=to.length(); if(dist>1e-3) to.normalize();
+    const band=f.range*0.7;
+    const followGap = order==='fallback'?22 : order==='guard'?40 : 70;     // how close we hold on the leader
+    let mv=new THREE.Vector3();
+    if(!engage){ if(dist>followGap) mv.copy(to); }                  // form up / fall back on the player
+    else if(dist>band) mv.copy(to);                                 // close in to firing range
+    else if(dist<band*0.45) mv.copy(to).multiplyScalar(-1);         // too close — give ground
+    else { a.strafeCd-=dt; if(a.strafeCd<=0){ a.strafeDir*=-1; a.strafeCd=rndR(f.strafeCd); }
+           mv.set(-to.z,0,to.x).multiplyScalar(a.strafeDir*0.6); }  // circle-strafe while firing
+    mv.y=0; if(mv.lengthSq()>1e-4) mv.normalize();
+    // jump jets (jet-capable chassis only)
+    a.jumpCd-=dt;
+    const floorA=terrainHeightAt(a.pos.x, a.pos.z);
+    const grounded=a.pos.y<=floorA+0.1;
+    if((f.jump||0)>0 && grounded && a.jumpCd<=0 && engage && dist>band*0.6){ a.vy=46*f.jump; a.jumping=true; a.jumpCd=rndR(f.jumpCd); }
+    if(!grounded || a.vy>0){ a.vy-=70*dt; a.pos.y+=a.vy*dt; if(a.pos.y<=floorA){ a.pos.y=floorA; a.vy=0; a.jumping=false; } }
+    const airborne=a.pos.y>floorA+2;
+    if(a.vy>1){ a.jetT-=dt; if(a.jetT<=0){ a.jetT=0.05; const fp=a.pos.clone(); fp.y+=2; fxPuff(fp, 0xffd0a0, 2.4*(f.scale||1), 0.3); } }
+    // horizontal move with wall-sliding (mirror the enemy footwork)
+    const prevX=a.pos.x, prevZ=a.pos.z;
+    const step=mv.multiplyScalar(f.speed*(airborne?1.3:1)*enemyLegMul(a)*dt);
+    const nx=clamp(a.pos.x+step.x,-ARENA,ARENA), nz=clamp(a.pos.z+step.z,-ARENA,ARENA);
+    const blocker=(x,z)=>{ for(const o of obstacles){ if(Math.abs(x-o.x)<o.hw && Math.abs(z-o.z)<o.hd && a.pos.y<(o.top||80)-4) return o; } return null; };
+    if(!blocker(nx,nz)){ a.pos.x=nx; a.pos.z=nz; }
+    else if(!blocker(nx,a.pos.z)) a.pos.x=nx;
+    else if(!blocker(a.pos.x,nz)) a.pos.z=nz;
+    const fl2=terrainHeightAt(a.pos.x, a.pos.z);
+    if(a.pos.y<fl2 || (grounded && !a.jumping)){ a.pos.y=fl2; if(a.vy<0) a.vy=0; }
+    a.grp.position.copy(a.pos);
+    // torso tracks the foe; legs face travel
+    const faceX=(engage?tgt.pos.x:player.pos.x)-a.pos.x, faceZ=(engage?tgt.pos.z:player.pos.z)-a.pos.z;
+    const aimYaw=Math.atan2(faceX, faceZ);
+    const mdx=a.pos.x-prevX, mdz=a.pos.z-prevZ;
+    if(a.legYaw===undefined) a.legYaw=aimYaw;
+    const wantLeg=Math.hypot(mdx,mdz)>0.05?Math.atan2(mdx,mdz):aimYaw;
+    a.legYaw=lerpAngle(a.legYaw, wantLeg, Math.min(1,dt*6));
+    const ud=a.grp.userData;
+    if(ud&&ud.torsoG){ ud.torsoG.rotation.y=aimYaw; ud.legsG.rotation.y=a.legYaw; } else a.grp.rotation.y=aimYaw;
+    if(ud&&ud.legsG) ud.legsG.rotation.x=lerpAngle(ud.legsG.rotation.x||0, airborne?-0.5:0, Math.min(1,dt*5));
+    // fire — 火力は健在な兵装腕に比例（部位破壊で減衰）
+    a.fireCd-=dt;
+    const wmul=enemyWeaponMul(a);
+    if(a.fireCd<=0 && engage && dist<f.range && wmul>0){
+      if(allyFire(a,tgt)) a.fireCd=f.fireCd*(0.8+Math.random()*0.5)/Math.max(0.5,wmul);
+      else a.fireCd=0.4;                              // no shot — retry soon while repositioning
+    }
+  }
+}
+
 function spawnStructure(type, cx, cz, ang, dist){
   const def=STRUCTS[type];
   const grp=buildStructure(type);
@@ -1689,9 +1970,11 @@ function objectiveTicker(){
 }
 
 function winMission(){
-  const reward = mission.reward + killsThisMission*5000 + structKills*9000;
+  const reward = mission.reward + salvageCredits + structKills*9000;
   SAVE.credits += reward;
   SAVE.stats.missions++;
+  // 回収した兵装(部品サルベージ)を兵装庫へ — 装備して再運用できる
+  for(const wid of missionSalvage){ if(WEAPONS[wid]) SAVE.inventory.push(wid); }
   // persist armor damage state
   cstate(SAVE.current).armor = player.armor;
   if(mission.id+1 > SAVE.unlockedMission) SAVE.unlockedMission = Math.min(MISSIONS.length-1, mission.id+1);
@@ -1877,6 +2160,13 @@ function damageEnemy(e, dmg, locId){
   if(killed || e.hp<=0){
     e.alive=false; scene.remove(e.grp);
     killsThisMission++; SAVE.stats.kills++;
+    // ---- 部品サルベージ: スクラップ収入 + 一定確率で兵装を回収 ----
+    salvageCredits += Math.round((e.def.reward||8000)*0.3);
+    const pool=e.def.salvage;
+    if(pool && pool.length && Math.random()<0.33){
+      const wid=pool[(Math.random()*pool.length)|0];
+      if(WEAPONS[wid]){ missionSalvage.push(wid); toast('◆ 部品回収: '+WEAPONS[wid].name); }   // toast: 直後の目標ティッカー更新で消えない
+    }
     Audio.explode();
     if(target===e){ target=null; lockState=0; }
     mechDeath(e);
@@ -1915,11 +2205,12 @@ function structDeath(s){
     p.x+=(Math.random()-0.5)*10; p.z+=(Math.random()-0.5)*10; fxPuff(p, 0x2a2d30, 9, 2); });
   spawnWreck(s.pos, s.def.color, 1.7);
   if(s.def.chain){
-    // fuel depot: massive blast catches nearby actors
+    // fuel depot: massive blast catches nearby actors (foes, facilities, wingmen, the player)
     Audio.explode();
     for(const e of enemies){ if(e.alive && e.pos.distanceTo(s.pos)<75) damageEnemy(e, 45); }
+    for(const a of allies){ if(a.alive && a.pos.distanceTo(s.pos)<75) damageAlly(a, 45); }
     for(const o of structures){ if(o!==s && o.alive && o.pos.distanceTo(s.pos)<75) damageStruct(o, 70); }
-    const pd=player.pos.distanceTo(s.pos); if(pd<70) hurtPlayer(Math.round((1-pd/70)*40));
+    const pd=player.pos.distanceTo(s.pos); if(pd<70) hurtPlayer(Math.round((1-pd/70)*40), null, s.pos);
   }
 }
 // 作戦要素: レーダー基地が生きている間は敵の防空（タレット/SAM）が正確。
@@ -2040,21 +2331,38 @@ function mechDeath(e){
   // charred hulk + scorch mark
   spawnWreck(base, e.def.color, sc);
 }
+/* ---------- target selection: foes split fire between the player and the lance ---------- */
+// world-space body centre of an actor (player or wingman) for incoming fire
+function actorAimPoint(a){
+  if(a===player){ const p=player.pos.clone(); p.y=player.eye; return p; }
+  const p=a.pos.clone(); p.y=(a.pos.y||0)+(a.eye||9); return p;
+}
+// pick the foe's victim: nearest of the player / living wingmen, biased toward the player
+function enemyAimActor(e){
+  let best=player, bd=e.pos.distanceTo(player.pos);
+  for(const a of allies){ if(!a.alive) continue;
+    const d=e.pos.distanceTo(a.pos)*1.25;   // wingmen are a little less tempting than the pilot
+    if(d<bd){ bd=d; best=a; }
+  }
+  return best;
+}
+
 /* ---------- screen shake + missile salvo (ripple fire) ---------- */
 let shake=0;
 function addShake(a){ shake=Math.min(2.4, shake+a); }
 let salvo=[];   // pending staggered missile launches (player)
 let eSalvo=[];  // pending staggered missile launches (enemy missile boats)
-// Enemy missile boat fires a staggered rocket salvo at the player. Balanced as a
+// Enemy missile boat fires a staggered rocket salvo at its target. Balanced as a
 // dodgeable threat: modest per-rocket damage, only mild homing, blockable by cover.
-function enemyMissileFire(e, wmul){
+function enemyMissileFire(e, wmul, tgt){
+  tgt=tgt||player;
   const f=e.def;
   const from=e.pos.clone(); from.y=(e.pos.y||0)+22*(f.scale||1);
-  const to=player.pos.clone(); to.y=player.eye;
+  const to=actorAimPoint(tgt);
   if(blockedByObstacle(from,to)) return;
   const baseDir=to.clone().sub(from).normalize();
   const n=Math.max(1, Math.round((f.salvo||4)*(0.5+0.5*(wmul==null?1:wmul))));
-  for(let k=0;k<n;k++) eSalvo.push({e, origin:from.clone(), dir:baseDir.clone(), delay:k*0.12, dmg:f.mdmg||6});
+  for(let k=0;k<n;k++) eSalvo.push({e, tgt, origin:from.clone(), dir:baseDir.clone(), delay:k*0.12, dmg:f.mdmg||6});
   Audio.missile();                         // launch klaxon telegraphs the incoming salvo
 }
 function launchEnemyMissile(s){
@@ -2066,9 +2374,10 @@ function launchEnemyMissile(s){
   mesh.scale.setScalar(1.3);
   const start=s.origin.clone(); start.x+=(Math.random()-0.5)*4; start.z+=(Math.random()-0.5)*4;
   mesh.position.copy(start); scene.add(mesh);
+  const hm = (s.tgt && s.tgt!==player) ? s.tgt : {alive:true, pos:player.pos};
   projectiles.push({mesh, vel:v.multiplyScalar(speed), dmg:s.dmg, range:760, traveled:0, owner:'enemy', speed,
     splash:0, proxR:13, color:0xff5a6a, trail:true, trailT:0,
-    homing:{alive:true, pos:player.pos}, steerMul:0.4});
+    homing:hm, steerMul:0.4});
   fxFlash(start, 0xffd27a, 3);
 }
 function launchMissile(s){
@@ -2089,9 +2398,10 @@ function launchMissile(s){
   Audio.launch(); addShake(0.18);
 }
 
-function enemyFire(e, wmul){
+function enemyFire(e, wmul, tgt){
+  tgt=tgt||player;
   const from = e.pos.clone(); from.y=(e.pos.y||0)+20*e.def.scale;
-  const to = player.pos.clone(); to.y=player.eye;
+  const to = actorAimPoint(tgt);
   if(blockedByObstacle(from,to)) return;
   const dir = to.clone().sub(from).normalize();
   // small inaccuracy
@@ -2102,9 +2412,10 @@ function enemyFire(e, wmul){
   projectiles.push({mesh, vel:dir.multiplyScalar(220), dmg, range:e.def.range+120, traveled:0, owner:'enemy', splash:0, color:e.def.color});
   Audio.cannon();
 }
-function hurtPlayer(dmg, locId){
+function hurtPlayer(dmg, locId, srcPos){
   if(invuln>0) return;
   dmgThisMission += dmg; SAVE.stats.damage += dmg;
+  if(srcPos){ dmgDir=Math.atan2(srcPos.x-player.pos.x, srcPos.z-player.pos.z); dmgDirT=1.3; }  // 被弾方向インジケーター
   damageFlash(); Audio.hit();
   if(player.loc){
     if(!locId) locId = randLoc(player.loc);
@@ -2228,7 +2539,10 @@ function update(dt){
   for(const e of enemies){
     if(!e.alive) continue;
     const f=e.def;
-    const toP = player.pos.clone().sub(e.pos); toP.y=0;
+    // who this foe is engaging — the player or a wingman (refreshed on mode switch)
+    if(!e.aimActor || !(e.aimActor===player || e.aimActor.alive)) e.aimActor=enemyAimActor(e);
+    const tgtA=e.aimActor, tg=(tgtA===player?player.pos:tgtA.pos);
+    const toP = new THREE.Vector3(tg.x-e.pos.x, 0, tg.z-e.pos.z);
     const distP = toP.length(); toP.normalize();
     const move = f.move||'strafer';
 
@@ -2240,6 +2554,7 @@ function update(dt){
     // ---- tactical mode switching so circling foes don't strafe forever ----
     e.modeCd -= dt;
     if(e.modeCd<=0){
+      e.aimActor=enemyAimActor(e);             // re-evaluate target periodically
       const r=Math.random();
       if(move==='plodder'||move==='bruiser') e.mode='advance';                 // heavies just grind in
       else if(move==='jumpjet')              e.mode = r<0.6?'advance':'strafe'; // flyers stay aggressive
@@ -2310,8 +2625,8 @@ function update(dt){
     const fl2 = terrainHeightAt(e.pos.x, e.pos.z);
     if(e.pos.y < fl2 || (grounded && !e.jumping)){ e.pos.y = fl2; if(e.vy<0) e.vy=0; }
     e.grp.position.copy(e.pos);
-    // torso tracks the player; legs face the direction of actual travel
-    const aimYaw = Math.atan2(player.pos.x-e.pos.x, player.pos.z-e.pos.z);
+    // torso tracks the engaged target; legs face the direction of actual travel
+    const aimYaw = Math.atan2(tg.x-e.pos.x, tg.z-e.pos.z);
     const mdx=e.pos.x-prevX, mdz=e.pos.z-prevZ;
     if(e.legYaw===undefined) e.legYaw=aimYaw;
     const wantLeg = Math.hypot(mdx,mdz)>0.05 ? Math.atan2(mdx,mdz) : aimYaw;
@@ -2325,10 +2640,12 @@ function update(dt){
     e.fireCd -= dt;
     const wmul=enemyWeaponMul(e);
     if(e.fireCd<=0 && distP < f.range && wmul>0){
-      if(f.missile){ enemyMissileFire(e, wmul); e.fireCd = (f.mcd||3.5)*(0.85+Math.random()*0.4); }
-      else { enemyFire(e, wmul); e.fireCd = f.fireCd*(0.8+Math.random()*0.6); }
+      if(f.missile){ enemyMissileFire(e, wmul, tgtA); e.fireCd = (f.mcd||3.5)*(0.85+Math.random()*0.4); }
+      else { enemyFire(e, wmul, tgtA); e.fireCd = f.fireCd*(0.8+Math.random()*0.6); }
     }
   }
+  // ---- AI 僚機 ----
+  updateAllies(dt);
 
   // ---- facilities: blink beacons, spin radar dishes, aim + fire defensive turrets ----
   const beaconLit = (Math.sin(performance.now()/220) > -0.2) ? 1.4 : 0.12;
@@ -2397,8 +2714,13 @@ function update(dt){
           }
         }
       } else {
-        const c=player.pos.clone(); c.y=player.eye;
-        if(p.mesh.position.distanceTo(c) < (p.proxR||11)){ hurtPlayer(p.dmg, playerHitLoc(p.mesh.position)); fxSpark(p.mesh.position, p.color); dead=true; }
+        // enemy round — can hit a wingman as well as the player
+        for(const a of allies){ if(!a.alive) continue;
+          const ca=a.pos.clone(); ca.y=(a.pos.y||0)+20*a.def.scale;
+          if(p.mesh.position.distanceTo(ca) < Math.max(p.proxR||11, 12*a.def.scale)){ damageAlly(a, p.dmg); fxSpark(p.mesh.position, p.color); dead=true; break; }
+        }
+        if(!dead){ const c=player.pos.clone(); c.y=player.eye;
+          if(p.mesh.position.distanceTo(c) < (p.proxR||11)){ hurtPlayer(p.dmg, playerHitLoc(p.mesh.position), p.mesh.position); fxSpark(p.mesh.position, p.color); dead=true; } }
       }
     }
     if(dead){
@@ -2443,6 +2765,7 @@ function update(dt){
     if(k>=1){ scene.remove(f.mesh); f.mesh.material.dispose(); pfx.splice(i,1); } }
 
   if(invuln>0) invuln-=dt;
+  if(dmgDirT>0) dmgDirT-=dt;
   if(player.lastHitT>0){ player.lastHitT-=dt; if(player.lastHitT<=0) player.lastHit=null; }
 
   updateHUD();
@@ -2546,6 +2869,27 @@ function updateHUD(){
   // own mech paper-doll
   drawDoll($('#doll'), player.loc, player.lastHit);
 
+  // AI 僚機ランス
+  const lb=$('#lanceBox');
+  if(allies.length){
+    lb.style.display='block';
+    const anyAlive=allies.some(a=>a.alive);
+    $('#lanceHdr').textContent = anyAlive ? ('僚機ランス — '+LANCE_ORDER_JP[lanceOrder]) : '僚機ランス';
+    const ll=$('#lanceList'); ll.innerHTML='';
+    for(const a of allies){
+      const pct = a.alive ? clamp(a.hp/a.maxhp*100,0,100) : 0;
+      const col = !a.alive ? '#5a1212' : pct>60?'#3dff7a':pct>30?'#ffd23a':'#ff6a3a';
+      const acol='#'+a.def.color.toString(16).padStart(6,'0');
+      const row=document.createElement('div');
+      row.className='lance'+(a.alive?'':' down');
+      row.innerHTML=`<span style="color:${acol};font-size:12px;">◆</span>`
+        +`<span class="nm">${a.def.name}</span>`
+        +(a.alive?`<span class="lbar"><i style="width:${pct}%;background:${col};"></i></span>`
+                 :`<span style="color:#ff6a3a;font-size:10px;">撃破</span>`);
+      ll.appendChild(row);
+    }
+  } else lb.style.display='none';
+
   // target panel
   if(target && target.alive){
     $('#targetBox').classList.add('on');
@@ -2648,6 +2992,22 @@ function drawOverlay(){
       if(isT){ ctx.fillStyle='#37d6ff'; ctx.font='11px Orbitron, monospace'; ctx.fillText(en.def.name.toUpperCase(), x0, y0-6); }
     }
   }
+  // friendly wingmen — caret + name + slim health bar so the lance reads as allied
+  for(const a of allies){ if(!a.alive) continue;
+    const c=a.pos.clone(); c.y=(a.pos.y||0)+22*a.def.scale; const s=worldToScreen(c);
+    if(!s || s.x<0 || s.x>w || s.y<0 || s.y>h) continue;
+    const col='#'+a.def.color.toString(16).padStart(6,'0');
+    const r=clamp(2000/s.z, 10, 50);
+    ctx.save();
+    ctx.strokeStyle=col; ctx.lineWidth=2; ctx.globalAlpha=.95;
+    ctx.beginPath(); ctx.moveTo(s.x-r,s.y-r+6); ctx.lineTo(s.x,s.y-r); ctx.lineTo(s.x+r,s.y-r+6); ctx.stroke();   // friendly caret
+    const pct=clamp(a.hp/a.maxhp,0,1);
+    ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(s.x-r, s.y-r-6, r*2, 3);
+    ctx.fillStyle = pct>0.5?'#3dff7a':pct>0.25?'#ffd23a':'#ff6a3a'; ctx.fillRect(s.x-r, s.y-r-6, r*2*pct, 3);
+    ctx.fillStyle=col; ctx.font='9px Orbitron, monospace';
+    ctx.fillText('▲ '+a.def.name, s.x-r, s.y-r-9);
+    ctx.restore();
+  }
   // objective facilities — amber diamond markers + off-screen guidance arrows
   for(const st of structures){ if(!st.alive || !st.isObjective) continue;
     const c=st.pos.clone(); c.y=st.aimY; const s=worldToScreen(c);
@@ -2665,6 +3025,19 @@ function drawOverlay(){
       drawEdgeArrow(ctx, c, isT?'#37d6ff':'#ffb000');
     }
   }
+  // off-screen threat arrows — point to the nearest foes you can't currently see
+  {
+    const threats=[];
+    for(const e of enemies){ if(!e.alive) continue;
+      const d=player.pos.distanceTo(e.pos); if(d>780) continue;
+      const c=e.pos.clone(); c.y=(e.pos.y||0)+20*e.def.scale;
+      const s=worldToScreen(c);
+      if(s && s.x>=24 && s.x<=w-24 && s.y>=24 && s.y<=h-24) continue;   // already visible
+      threats.push({e,c,d});
+    }
+    threats.sort((a,b)=>a.d-b.d);
+    for(const o of threats.slice(0,4)) drawEdgeArrow(ctx, o.c, o.e===target?'#37d6ff':'rgba(255,90,80,.7)');
+  }
   // crosshair
   const cx=w/2, cy=h/2;
   const inRange = target && target.alive && player.pos.distanceTo(target.pos) < 600;
@@ -2676,6 +3049,52 @@ function drawOverlay(){
   ctx.moveTo(cx,cy-26);ctx.lineTo(cx,cy-8); ctx.moveTo(cx,cy+8);ctx.lineTo(cx,cy+26);
   ctx.stroke();
   ctx.fillStyle=inRange?'#3dff7a':'#2f6b46'; ctx.fillRect(cx-1.5,cy-1.5,3,3);
+
+  // ---- directional damage indicator: a red chevron from the edge toward incoming fire ----
+  if(dmgDirT>0){
+    const k=clamp(dmgDirT/1.3,0,1);
+    const rel=Math.atan2(Math.sin(dmgDir-player.yaw), -Math.cos(dmgDir-player.yaw));   // 0=ahead, +=right
+    const Rx=Math.min(w*0.40, 360), Ry=Math.min(h*0.40, 270);
+    const px=cx+Math.sin(rel)*Rx, py=cy-Math.cos(rel)*Ry;
+    ctx.save(); ctx.translate(px,py); ctx.rotate(Math.atan2(cy-py, cx-px));   // point inward, toward center
+    ctx.fillStyle='rgba(255,58,47,'+(0.9*k)+')'; ctx.shadowColor='rgba(255,58,47,.8)'; ctx.shadowBlur=10;
+    ctx.beginPath(); ctx.moveTo(16,0); ctx.lineTo(-12,12); ctx.lineTo(-4,0); ctx.lineTo(-12,-12); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  // ---- heading compass strip (top center) ----
+  drawCompass(ctx, w);
+}
+// classic heading tape: cardinal points + objective / enemy-base bearings, locked to player.yaw
+function drawCompass(ctx, w){
+  const cx=w/2, y=30, halfW=Math.min(300, w*0.34), HFOV=1.15;   // ~66° each side
+  const place=(beta)=>{ const rel=Math.atan2(Math.sin(beta-player.yaw), -Math.cos(beta-player.yaw));
+    return Math.abs(rel)<=HFOV ? cx+(rel/HFOV)*halfW : null; };
+  ctx.save();
+  ctx.textAlign='center';
+  ctx.strokeStyle='rgba(61,255,122,.22)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(cx-halfW,y); ctx.lineTo(cx+halfW,y); ctx.stroke();
+  // heading marker (center)
+  ctx.fillStyle='#3dff7a'; ctx.beginPath(); ctx.moveTo(cx,y-8); ctx.lineTo(cx-5,y-1); ctx.lineTo(cx+5,y-1); ctx.closePath(); ctx.fill();
+  // cardinals + intercardinals
+  const card=[['北',0,-1],['東',1,0],['南',0,1],['西',-1,0],['北東',0.7,-0.7],['南東',0.7,0.7],['南西',-0.7,0.7],['北西',-0.7,-0.7]];
+  ctx.font='10px Orbitron, monospace';
+  for(const [lab,dx,dz] of card){ const x=place(Math.atan2(dx,dz)); if(x==null) continue;
+    const major=lab.length===1;
+    ctx.strokeStyle = major?'rgba(61,255,122,.55)':'rgba(61,255,122,.3)';
+    ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x,y+(major?8:5)); ctx.stroke();
+    ctx.fillStyle = major?'#bfeccb':'rgba(150,190,165,.65)';
+    ctx.fillText(lab, x, y+19);
+  }
+  // objective + enemy-base bearings above the tape
+  for(const st of structures){ if(!st.alive || !st.isObjective) continue;
+    const x=place(Math.atan2(st.pos.x-player.pos.x, st.pos.z-player.pos.z)); if(x==null) continue;
+    ctx.fillStyle = st===target?'#37d6ff':'#ffb000'; ctx.fillText('◈', x, y-5);
+  }
+  if(mission && mission.base){ const dx=mission.base.x-player.pos.x, dz=mission.base.z-player.pos.z;
+    if(Math.hypot(dx,dz)>150){ const x=place(Math.atan2(dx,dz)); if(x!=null){ ctx.fillStyle='#37d6ff'; ctx.fillText('▲基地', x, y-5); } }
+  }
+  ctx.restore();
 }
 function worldToScreen(v){
   const p=v.clone().project(camera);
@@ -2739,6 +3158,17 @@ function drawRadar(){
     if(m>R){ bx=cx+rx*scaleR*R/m; by=cy+rz*scaleR*R/m; }
     ctx.fillStyle = st===target?'#37d6ff':'#ffb000';
     ctx.beginPath(); ctx.moveTo(bx,by-3.4); ctx.lineTo(bx+3.4,by); ctx.lineTo(bx,by+3.4); ctx.lineTo(bx-3.4,by); ctx.fill();
+  }
+  // friendly wingmen — cyan-green diamonds
+  for(const a of allies){ if(!a.alive) continue;
+    const dx=a.pos.x-player.pos.x, dz=a.pos.z-player.pos.z;
+    const c=Math.cos(player.yaw), s=Math.sin(player.yaw);
+    const rx=dx*c-dz*s, rz=dx*s+dz*c;
+    let bx=cx+rx*scaleR, by=cy+rz*scaleR;
+    const m=Math.hypot(rx,rz)*scaleR;
+    if(m>R){ bx=cx+rx*scaleR*R/m; by=cy+rz*scaleR*R/m; }
+    ctx.fillStyle='#4ad6a0';
+    ctx.beginPath(); ctx.moveTo(bx,by-3); ctx.lineTo(bx+3,by); ctx.lineTo(bx,by+3); ctx.lineTo(bx-3,by); ctx.fill();
   }
   // player
   ctx.fillStyle='#3dff7a'; ctx.beginPath(); ctx.moveTo(cx,cy-5); ctx.lineTo(cx-4,cy+4); ctx.lineTo(cx+4,cy+4); ctx.fill();
@@ -2834,11 +3264,18 @@ function openBrief(mi){
   if(t.ambush) waves+='<br><span style="color:var(--red)">⚠ 待ち伏せの情報あり — 接近時に警戒せよ</span>';
   $('#brWaves').innerHTML=waves;
   $('#brReward').innerHTML='契約報酬: <b style="color:var(--amber)">'+fmt(m.reward)+
-    ' C-bills</b> + 撃破サルベージ 1機 5,000'+(t.structs?' / 施設破壊 1基 9,000':'');
+    ' C-bills</b> + 撃破スクラップ収入'+(t.structs?' / 施設破壊 1基 9,000':'')+
+    '<br><span style="color:#4ad6a0">◆ 撃破した敵から兵装(部品)を確率で回収 — 兵装庫に追加され再利用できる</span>';
   const cs=cstate(SAVE.current);
   const armPct=Math.round(cs.armor/maxArmorOf(SAVE.current)*100);
   $('#brMech').innerHTML=`搭乗機: <b>${CHASSIS[SAVE.current].name}</b> · 装甲 ${armPct}% · 武器 ${cstate(SAVE.current).loadout.length} 基装備`+
     (armPct<60?' · <span style="color:var(--amber)">修理を推奨</span>':'');
+  // 随伴ランス（編成済みの僚機）— ブリーフィングで確認
+  const lance=(SAVE.lance||[]).filter(id=>WINGMEN[id]).slice(0, LANCE_MAX);
+  $('#brLance').innerHTML = lance.length
+    ? '随伴僚機: ' + lance.map(id=>{ const W=WINGMEN[id]; const c='#'+W.color.toString(16).padStart(6,'0');
+        return `<b style="color:${c}">◆ ${W.name}</b>`; }).join(' · ')
+    : '随伴僚機: <span style="opacity:.7">なし（僚機ベイで編成可能）</span>';
   showScreen('scrBrief');
 }
 
@@ -2849,11 +3286,20 @@ function showResult(win, reward){
   $('#resTitle').style.color = win?'var(--phos)':'var(--red)';
   $('#resTitle').style.textShadow = win?'0 0 26px rgba(61,255,122,.4)':'0 0 26px rgba(255,58,47,.4)';
   if(win){
+    // 部品サルベージの内訳
+    const counts={}; missionSalvage.forEach(w=>counts[w]=(counts[w]||0)+1);
+    const parts=Object.keys(counts).map(w=>WEAPONS[w].name+(counts[w]>1?' ×'+counts[w]:'')).join('・');
     $('#resBody').innerHTML =
       `敵撃破数: <b>${killsThisMission}</b><br>`+
       (structKills?`施設破壊: <b>${structKills}</b> 基<br>`:'')+
       `被ダメージ: <b>${Math.round(missionStartArmor-player.armor)}</b> 装甲<br>`+
-      `報酬: <span class="credits">${fmt(reward)} C-bills</span><br>`+
+      `<div class="hr" style="margin:8px auto; max-width:320px;"></div>`+
+      `契約報酬: <b>${fmt(mission.reward)}</b> C-bills<br>`+
+      `スクラップ収入: <b>${fmt(salvageCredits)}</b> C-bills<br>`+
+      (structKills?`施設破壊報酬: <b>${fmt(structKills*9000)}</b> C-bills<br>`:'')+
+      `<span style="color:#4ad6a0">◆ 部品サルベージ: <b>${parts||'なし'}</b></span><br>`+
+      `<div class="hr" style="margin:8px auto; max-width:320px;"></div>`+
+      `総報酬: <span class="credits">${fmt(reward)} C-bills</span><br>`+
       `資金: <b>${fmt(SAVE.credits)} C-bills</b>`;
   } else {
     $('#resBody').innerHTML =
@@ -2874,10 +3320,43 @@ function switchTab(t){
   $('#tabLoadout').style.display = t==='loadout'?'block':'none';
   $('#tabArsenal').style.display = t==='arsenal'?'block':'none';
   $('#tabBay').style.display = t==='bay'?'block':'none';
+  $('#tabLance').style.display = t==='lance'?'block':'none';
 }
 function renderLab(){
   $('#labCredits').textContent=fmt(SAVE.credits)+' C-bills';
-  renderLoadout(); renderArsenal(); renderBay();
+  renderLoadout(); renderArsenal(); renderBay(); renderLance();
+}
+// 僚機ベイ: 雇用 と ランス編成（最大 LANCE_MAX 機）
+function renderLance(){
+  const cap=$('#lanceCap'); if(cap) cap.textContent=LANCE_MAX;
+  const wl=$('#wingList'); if(!wl) return; wl.innerHTML='';
+  WINGMAN_ORDER.forEach(id=>{
+    const W=WINGMEN[id], ch=CHASSIS[W.chassis];
+    const hired=SAVE.hiredWingmen.includes(id), inLance=SAVE.lance.includes(id);
+    const wnames=W.weps.map(w=>WEAPONS[w]?WEAPONS[w].name:w).join('・');
+    const acol='#'+W.color.toString(16).padStart(6,'0');
+    const line=document.createElement('div'); line.className='itemline';
+    line.innerHTML=`<div class="nm2">
+        <div class="t"><span style="color:${acol}">◆</span> ${W.name} <span style="color:#7fa389">${ch.cls}</span>${inLance?' <span style="color:#4ad6a0">編成中</span>':''}</div>
+        <div class="d">${ch.name}（${ch.ton}t）· 兵装: ${wnames}</div>
+        <div class="d" style="opacity:.8">${W.bio}</div></div>
+      ${hired?'':'<span class="price">'+(W.free?'無料':fmt(W.cost))+'</span>'}`;
+    const btn=document.createElement('button'); btn.className='mini';
+    if(!hired){
+      btn.textContent = W.free?'取得':'雇用';
+      btn.disabled = !W.free && SAVE.credits<W.cost;
+      btn.onclick=()=>{ if(!W.free && SAVE.credits<W.cost) return; if(!W.free) SAVE.credits-=W.cost;
+        SAVE.hiredWingmen.push(id); persist(); toast(W.name+' を雇用'); renderLab(); };
+    } else if(inLance){
+      btn.textContent='外す';
+      btn.onclick=()=>{ SAVE.lance=SAVE.lance.filter(x=>x!==id); persist(); renderLance(); };
+    } else {
+      const full=SAVE.lance.length>=LANCE_MAX;
+      btn.textContent = full?'満員':'編成'; btn.disabled=full;
+      btn.onclick=()=>{ if(SAVE.lance.length>=LANCE_MAX) return; SAVE.lance.push(id); persist(); renderLance(); };
+    }
+    line.appendChild(btn); wl.appendChild(line);
+  });
 }
 function renderLoadout(){
   const id=SAVE.current, ch=CHASSIS[id], cs=cstate(id);
@@ -3042,6 +3521,7 @@ function initInput(){
       if(k==='2'){ fireHeld[2]=true; }
       if(k==='r'||k==='tab'){ cycleTarget(); }
       if(k==='e'||k==='f'||k==='q'){ toggleLock(); }   // ロックオン
+      if(k==='c'){ cycleLanceOrder(); }                // 僚機への戦術指示
       if(k==='escape'){ pauseGame(); }
       // toggle the diagnostic readout with the backquote key
       if(k==='`'){ window._gpDebugForce=!window._gpDebugForce; }
@@ -3119,6 +3599,7 @@ function initTouch(){
   const tap=(el,fn)=>{ el.addEventListener('touchstart',e=>{e.preventDefault(); press(el,true); fn();},{passive:false});
     const up=()=>press(el,false); el.addEventListener('touchend',up); el.addEventListener('touchcancel',up); };
   tap($('#cycle'), cycleTarget);
+  tap($('#cmd'), cycleLanceOrder);
   tap($('#lockBtn'), toggleLock);
   tap($('#pauseBtn'), pauseGame);
 }
@@ -3168,7 +3649,7 @@ function pollGamepad(dt){
     fireHeld[2] = pressed(6)||pressed(4);
     keys['jet'] = pressed(0)||pressed(1);
     gpFresh(btn,'cycleY',3,cycleTarget);
-    gpFresh(btn,'cycleX',2,cycleTarget);
+    gpFresh(btn,'cmdX',2,cycleLanceOrder);   // X = 僚機への戦術指示
     gpFresh(btn,'stickR',11,cycleTarget);
     gpFresh(btn,'lockL',10,toggleLock);     // L3押し込みでロックオン
     gpFresh(btn,'pause',9,pauseGame);
@@ -3430,16 +3911,18 @@ function renderKeys(){
     ['Space','ジャンプジェット'],
     ['R / Tab','目標切替'],
     ['E / Q / F','ロックオン（照準下の敵を捕捉）'],
+    ['C','僚機指示（各個/集中/護衛/退避）'],
     ['Esc','一時停止 / 設定'],
   ];
-  const tm = isTouch? [['左スティック','移動'],['右側ドラッグ','視点・照準'],['射撃 1 / 射撃 2','武器グループ（長押し）'],['JET','ジャンプジェット（長押し）'],['目標 ▸','目標切替'],['ロック','ロックオン'],['❚❚','一時停止 / メニュー']] : rows;
+  const tm = isTouch? [['左スティック','移動'],['右側ドラッグ','視点・照準'],['射撃 1 / 射撃 2','武器グループ（長押し）'],['JET','ジャンプジェット（長押し）'],['目標 ▸','目標切替'],['指示 ▸','僚機指示（各個/集中/護衛/退避）'],['ロック','ロックオン'],['❚❚','一時停止 / メニュー']] : rows;
   const gpRows=[
     ['左スティック / 十字','移動 / 横移動'],
     ['右スティック','視点・照準'],
     ['ZR / R','トリガーグループ1で射撃'],
     ['ZL / L','トリガーグループ2で射撃'],
     ['A / B','ジャンプジェット'],
-    ['X / Y','目標切替'],
+    ['Y / R3','目標切替'],
+    ['X','僚機指示（各個/集中/護衛/退避）'],
     ['左スティック押込','ロックオン'],
     ['＋ / －','一時停止 / メニュー'],
     ['メニュー: 十字 / 左スティック','項目を選択（カーソル移動）'],
